@@ -1,143 +1,342 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Configurações - Sistema de Automação</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+        }
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+        }
+        .navbar-brand, .nav-link {
+            color: white !important;
+        }
+        .form-section {
+            background-color: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        }
+        .section-title {
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .color-preview {
+            width: 50px;
+            height: 50px;
+            border: 1px solid #ccc;
+            display: inline-block;
+            margin-left: 10px;
+            border-radius: 5px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            border: none;
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, var(--secondary-color) 0%, var(--primary-color) 100%);
+            transform: translateY(-2px);
+        }
+        .upload-preview {
+            width: 100px;
+            height: 100px;
+            object-fit: contain;
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 5px;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
-    <header>
-        <h1>Configurações do Cliente</h1>
-        <nav>
-            <a href="/">Voltar</a>
-            <a href="/logout">Sair</a>
-        </nav>
-    </header>
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-cog"></i> Configurações do Cliente
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">
+                            <i class="fas fa-arrow-left"></i> Voltar
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/logout">
+                            <i class="fas fa-sign-out-alt"></i> Sair
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
     
-    <main>
-        <form id="configForm">
-            <h2>Informações Básicas</h2>
-            <div class="form-group">
-                <label>Nome do Cliente:</label>
-                <input type="text" name="nome_cliente" value="{{ config.nome }}" required>
-            </div>
-            
-            <h2>Integração WordPress</h2>
-            <div class="form-group checkbox">
-                <label>
-                    <input type="checkbox" name="wp_integracao" {% if config.wp_integracao %}checked{% endif %}>
-                    Ativar integração com WordPress
-                </label>
-            </div>
-            <div class="form-group">
-                <label>URL do WordPress:</label>
-                <input type="url" name="wp_url" value="{{ config.wp_url }}">
-            </div>
-            <div class="form-group">
-                <label>Usuário WordPress:</label>
-                <input type="text" name="wp_user" value="{{ config.wp_user }}">
-            </div>
-            <div class="form-group">
-                <label>Senha WordPress:</label>
-                <input type="password" name="wp_password" value="{{ config.wp_password }}">
-            </div>
-            
-            <h2>Integração com Redes Sociais</h2>
-            <div class="form-group">
-                <label>Token Meta API:</label>
-                <input type="text" name="meta_token" value="{{ config.meta_token }}">
-            </div>
-            
-            <div class="form-group checkbox">
-                <label>
-                    <input type="checkbox" name="instagram_integracao" {% if config.instagram_integracao %}checked{% endif %}>
-                    Ativar Instagram
-                </label>
-            </div>
-            <div class="form-group">
-                <label>Instagram Business ID:</label>
-                <input type="text" name="instagram_id" value="{{ config.instagram_id }}">
-            </div>
-            
-            <div class="form-group checkbox">
-                <label>
-                    <input type="checkbox" name="facebook_integracao" {% if config.facebook_integracao %}checked{% endif %}>
-                    Ativar Facebook
-                </label>
-            </div>
-            <div class="form-group">
-                <label>Facebook Page ID:</label>
-                <input type="text" name="facebook_page_id" value="{{ config.facebook_page_id }}">
-            </div>
-            
-            <h2>Design da Imagem</h2>
-            <div class="form-group">
-                <label>URL do Logo:</label>
-                <input type="url" name="url_logo" value="{{ config.url_logo }}" required>
-            </div>
-            
-            <div class="color-pickers">
-                <div class="form-group">
-                    <label>Cor de Fundo:</label>
-                    <input type="color" name="cor_fundo" value="{{ config.cor_fundo }}">
-                </div>
-                <div class="form-group">
-                    <label>Cor do Texto:</label>
-                    <input type="color" name="cor_texto" value="{{ config.cor_texto }}">
-                </div>
-                <div class="form-group">
-                    <label>Cor de Destaque:</label>
-                    <input type="color" name="cor_destaque" value="{{ config.cor_destaque }}">
-                </div>
-                <div class="form-group">
-                    <label>Cor da Borda:</label>
-                    <input type="color" name="cor_borda" value="{{ config.cor_borda }}">
+    <div class="container">
+        <form id="configForm" enctype="multipart/form-data">
+            <div class="form-section">
+                <h3 class="section-title"><i class="fas fa-info-circle"></i> Informações Básicas</h3>
+                <div class="mb-3">
+                    <label for="nome_cliente" class="form-label">Nome do Cliente *</label>
+                    <input type="text" class="form-control" id="nome_cliente" name="nome_cliente" 
+                           value="{{ config.nome }}" required>
                 </div>
             </div>
-            
-            <div class="form-group">
-                <label>Espessura da Borda:</label>
-                <input type="number" name="espessura_borda" value="{{ config.espessura_borda }}" min="0" max="20">
+
+            <div class="form-section">
+                <h3 class="section-title"><i class="fas fa-wordpress"></i> Configuração do WordPress</h3>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="wp_integracao" name="wp_integracao" 
+                           {{ 'checked' if config.wp_integracao else '' }}>
+                    <label class="form-check-label" for="wp_integracao">Ativar integração com WordPress</label>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="wp_url" class="form-label">URL do WordPress</label>
+                        <input type="url" class="form-control" id="wp_url" name="wp_url" 
+                               value="{{ config.wp_url }}" placeholder="https://meusite.com">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="wp_user" class="form-label">Usuário WordPress</label>
+                        <input type="text" class="form-control" id="wp_user" name="wp_user" 
+                               value="{{ config.wp_user }}">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="wp_password" class="form-label">Senha WordPress</label>
+                        <input type="password" class="form-control" id="wp_password" name="wp_password" 
+                               value="{{ config.wp_password }}">
+                    </div>
+                </div>
             </div>
-            
-            <div class="form-group">
-                <label>Arredondamento da Borda:</label>
-                <input type="number" name="arredondamento_borda" value="{{ config.arredondamento_borda }}" min="0" max="50">
+
+            <div class="form-section">
+                <h3 class="section-title"><i class="fas fa-share-alt"></i> Configuração de Redes Sociais</h3>
+                <div class="mb-3">
+                    <label for="meta_token" class="form-label">Token da Meta API</label>
+                    <input type="text" class="form-control" id="meta_token" name="meta_token" 
+                           value="{{ config.meta_token }}">
+                    <div class="form-text">Necessário para Instagram e Facebook</div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="instagram_integracao" name="instagram_integracao"
+                                   {{ 'checked' if config.instagram_integracao else '' }}>
+                            <label class="form-check-label" for="instagram_integracao">Ativar Instagram</label>
+                        </div>
+                        <label for="instagram_id" class="form-label mt-2">Instagram Business ID</label>
+                        <input type="text" class="form-control" id="instagram_id" name="instagram_id" 
+                               value="{{ config.instagram_id }}">
+                    </div>
+                    
+                    <div class="col-md-6 mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="facebook_integracao" name="facebook_integracao"
+                                   {{ 'checked' if config.facebook_integracao else '' }}>
+                            <label class="form-check-label" for="facebook_integracao">Ativar Facebook</label>
+                        </div>
+                        <label for="facebook_page_id" class="form-label mt-2">Facebook Page ID</label>
+                        <input type="text" class="form-control" id="facebook_page_id" name="facebook_page_id" 
+                               value="{{ config.facebook_page_id }}">
+                    </div>
+                </div>
             </div>
-            
-            <div class="form-group">
-                <label>Texto do Rodapé:</label>
-                <input type="text" name="texto_rodape" value="{{ config.texto_rodape }}">
+
+            <div class="form-section">
+                <h3 class="section-title"><i class="fas fa-palette"></i> Personalização de Design</h3>
+                
+                <div class="mb-3">
+                    <label for="logo_arquivo" class="form-label">Upload do Logo</label>
+                    <input type="file" class="form-control" id="logo_arquivo" name="logo_arquivo" accept="image/*">
+                    <div class="form-text">Faça upload do seu logo. Formatos: PNG, JPG, JPEG, GIF</div>
+                    {% if config.logo_filename %}
+                    <div class="mt-2">
+                        <img src="{{ url_for('download_file', filename='logos/' + config.logo_filename) }}" 
+                             alt="Logo atual" class="upload-preview">
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label for="cor_fundo" class="form-label">Cor de Fundo</label>
+                        <input type="color" class="form-control" id="cor_fundo" name="cor_fundo" 
+                               value="{{ config.cor_fundo or '#ffffff' }}">
+                        <span class="color-preview" id="preview_fundo" 
+                              style="background-color: {{ config.cor_fundo or '#ffffff' }}"></span>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="cor_texto" class="form-label">Cor do Texto</label>
+                        <input type="color" class="form-control" id="cor_texto" name="cor_texto" 
+                               value="{{ config.cor_texto or '#000000' }}">
+                        <span class="color-preview" id="preview_texto" 
+                              style="background-color: {{ config.cor_texto or '#000000' }}"></span>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="cor_destaque" class="form-label">Cor de Destaque</label>
+                        <input type="color" class="form-control" id="cor_destaque" name="cor_destaque" 
+                               value="{{ config.cor_destaque or '#d90429' }}">
+                        <span class="color-preview" id="preview_destaque" 
+                              style="background-color: {{ config.cor_destaque or '#d90429' }}"></span>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="cor_borda" class="form-label">Cor da Borda</label>
+                        <input type="color" class="form-control" id="cor_borda" name="cor_borda" 
+                               value="{{ config.cor_borda or '#000000' }}">
+                        <span class="color-preview" id="preview_borda" 
+                              style="background-color: {{ config.cor_borda or '#000000' }}"></span>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label for="cor_categoria" class="form-label">Cor da Categoria</label>
+                        <input type="color" class="form-control" id="cor_categoria" name="cor_categoria" 
+                               value="{{ config.cor_categoria or '#ff0000' }}">
+                        <span class="color-preview" id="preview_categoria" 
+                              style="background-color: {{ config.cor_categoria or '#ff0000' }}"></span>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="espessura_borda" class="form-label">Espessura da Borda</label>
+                        <input type="range" class="form-range" id="espessura_borda" name="espessura_borda" 
+                               min="0" max="20" value="{{ config.espessura_borda or 5 }}">
+                        <output for="espessura_borda" id="valor_espessura">{{ config.espessura_borda or 5 }}px</output>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="arredondamento_borda" class="form-label">Arredondamento da Borda</label>
+                        <input type="range" class="form-range" id="arredondamento_borda" name="arredondamento_borda" 
+                               min="0" max="50" value="{{ config.arredondamento_borda or 20 }}">
+                        <output for="arredondamento_borda" id="valor_arredondamento">{{ config.arredondamento_borda or 20 }}px</output>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="texto_rodape" class="form-label">Texto do Rodapé</label>
+                        <input type="text" class="form-control" id="texto_rodape" name="texto_rodape" 
+                               value="{{ config.texto_rodape or '@SUAEMPRESA' }}">
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="hashtags_padrao" class="form-label">Hashtags Padrão</label>
+                    <input type="text" class="form-control" id="hashtags_padrao" name="hashtags_padrao" 
+                           value="{{ config.hashtags_padrao or '#noticias #brasil' }}">
+                    <div class="form-text">Separadas por espaço</div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="fonte_titulo_arquivo" class="form-label">Upload Fonte do Título</label>
+                        <input type="file" class="form-control" id="fonte_titulo_arquivo" name="fonte_titulo_arquivo" accept=".ttf,.otf">
+                        <div class="form-text">Ou selecione uma fonte existente:</div>
+                        <select class="form-select mt-2" id="fonte_titulo" name="fonte_titulo">
+                            <option value="Arial" {{ 'selected' if config.fonte_titulo == 'Arial' else '' }}>Arial</option>
+                            <option value="Helvetica" {{ 'selected' if config.fonte_titulo == 'Helvetica' else '' }}>Helvetica</option>
+                            <option value="Times New Roman" {{ 'selected' if config.fonte_titulo == 'Times New Roman' else '' }}>Times New Roman</option>
+                            {% for fonte in fontes_disponiveis %}
+                            <option value="{{ fonte }}" {{ 'selected' if config.fonte_titulo == fonte else '' }}>{{ fonte }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="tamanho_fonte_titulo" class="form-label">Tamanho Fonte Título</label>
+                        <input type="number" class="form-control" id="tamanho_fonte_titulo" name="tamanho_fonte_titulo" 
+                               value="{{ config.tamanho_fonte_titulo or 50 }}">
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="fonte_rodape_arquivo" class="form-label">Upload Fonte do Rodapé</label>
+                        <input type="file" class="form-control" id="fonte_rodape_arquivo" name="fonte_rodape_arquivo" accept=".ttf,.otf">
+                        <div class="form-text">Ou selecione uma fonte existente:</div>
+                        <select class="form-select mt-2" id="fonte_rodape" name="fonte_rodape">
+                            <option value="Arial" {{ 'selected' if config.fonte_rodape == 'Arial' else '' }}>Arial</option>
+                            <option value="Helvetica" {{ 'selected' if config.fonte_rodape == 'Helvetica' else '' }}>Helvetica</option>
+                            <option value="Times New Roman" {{ 'selected' if config.fonte_rodape == 'Times New Roman' else '' }}>Times New Roman</option>
+                            {% for fonte in fontes_disponiveis %}
+                            <option value="{{ fonte }}" {{ 'selected' if config.fonte_rodape == fonte else '' }}>{{ fonte }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="tamanho_fonte_rodape" class="form-label">Tamanho Fonte Rodapé</label>
+                        <input type="number" class="form-control" id="tamanho_fonte_rodape" name="tamanho_fonte_rodape" 
+                               value="{{ config.tamanho_fonte_rodape or 30 }}">
+                    </div>
+                </div>
             </div>
-            
-            <div class="form-group">
-                <label>Hashtags Padrão:</label>
-                <input type="text" name="hashtags_padrao" value="{{ config.hashtags_padrao }}">
+
+            <div class="d-grid gap-2">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="fas fa-save"></i> Salvar Configurações
+                </button>
+                <a href="/" class="btn btn-secondary">
+                    <i class="fas fa-times"></i> Cancelar
+                </a>
             </div>
-            
-            <div class="form-group">
-                <label>Fonte do Título:</label>
-                <input type="text" name="fonte_titulo" value="{{ config.fonte_titulo }}" placeholder="ex: Arial, Anton-Regular.ttf">
-            </div>
-            
-            <div class="form-group">
-                <label>Tamanho da Fonte do Título:</label>
-                <input type="number" name="tamanho_fonte_titulo" value="{{ config.tamanho_fonte_titulo }}">
-            </div>
-            
-            <div class="form-group">
-                <label>Fonte do Rodapé:</label>
-                <input type="text" name="fonte_rodape" value="{{ config.fonte_rodape }}" placeholder="ex: Arial, Anton-Regular.ttf">
-            </div>
-            
-            <div class="form-group">
-                <label>Tamanho da Fonte do Rodapé:</label>
-                <input type="number" name="tamanho_fonte_rodape" value="{{ config.tamanho_fonte_rodape }}">
-            </div>
-            
-            <button type="submit">Salvar Configurações</button>
         </form>
-    </main>
-    
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Atualizar visualização das cores
+        document.querySelectorAll('input[type="color"]').forEach(input => {
+            input.addEventListener('input', function() {
+                const previewId = 'preview_' + this.id.split('_')[1];
+                if (document.getElementById(previewId)) {
+                    document.getElementById(previewId).style.backgroundColor = this.value;
+                }
+            });
+        });
+        
+        // Atualizar valores dos ranges
+        document.getElementById('espessura_borda').addEventListener('input', function() {
+            document.getElementById('valor_espessura').textContent = this.value + 'px';
+        });
+        
+        document.getElementById('arredondamento_borda').addEventListener('input', function() {
+            document.getElementById('valor_arredondamento').textContent = this.value + 'px';
+        });
+
+        // Enviar formulário
+        document.getElementById('configForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            
+            try {
+                const response = await fetch('/configurar', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.sucesso) {
+                    alert('Configurações salvas com sucesso!');
+                } else {
+                    alert('Erro ao salvar configurações.');
+                }
+            } catch (error) {
+                alert('Erro de conexão. Tente novamente.');
+            }
+        });
+    </script>
 </body>
 </html>
