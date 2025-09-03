@@ -66,6 +66,12 @@
             padding-left: 10px;
             margin: 20px 0;
         }
+        #imagemPreview {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -99,9 +105,10 @@
             <div class="col-md-6">
                 <div class="stat-card">
                     <h3><i class="fas fa-cog"></i> Configuração</h3>
-                    <p>Status: <span class="badge bg-{{ 'success' if config.wp_url else 'warning' }}">
-                        {{ 'Completa' if config.wp_url else 'Pendente' }}
+                    <p>Status: <span class="badge bg-{{ 'success' if config_completa else 'warning' }}">
+                        {{ 'Completa' if config_completa else 'Pendente' }}
                     </span></p>
+                    <p>Cliente ID: <code>{{ cliente_id }}</code></p>
                 </div>
             </div>
             <div class="col-md-6">
@@ -125,6 +132,9 @@
                         <button class="btn btn-primary" onclick="visualizarImagem()">
                             <i class="fas fa-eye"></i> Visualizar Modelo de Imagem
                         </button>
+                        <div id="imagemPreviewContainer" class="mt-3 text-center">
+                            <img id="imagemPreview" alt="Preview da imagem">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -268,16 +278,52 @@
         
         // Testar feed
         async function testarFeed(feedId) {
-            // Implementar teste de feed
             alert('Funcionalidade de teste de feed em desenvolvimento.');
         }
         
-        function testarWebhook() {
-            alert('Funcionalidade de teste de webhook em desenvolvimento.');
+        // Testar webhook
+        async function testarWebhook() {
+            try {
+                const response = await fetch('/testar-webhook', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.sucesso) {
+                    alert('Webhook testado com sucesso! Verifique os logs para mais detalhes.');
+                } else {
+                    alert('Erro ao testar webhook: ' + JSON.stringify(result));
+                }
+            } catch (error) {
+                alert('Erro de conexão. Tente novamente.');
+            }
         }
         
-        function visualizarImagem() {
-            alert('Funcionalidade de visualização de imagem em desenvolvimento.');
+        // Visualizar imagem
+        async function visualizarImagem() {
+            try {
+                const response = await fetch('/visualizar-imagem', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.sucesso) {
+                    document.getElementById('imagemPreview').src = result.imagem;
+                    document.getElementById('imagemPreview').style.display = 'block';
+                } else {
+                    alert('Erro ao visualizar imagem: ' + result.erro);
+                }
+            } catch (error) {
+                alert('Erro de conexão. Tente novamente.');
+            }
         }
     </script>
 </body>
