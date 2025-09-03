@@ -217,7 +217,7 @@ def criar_imagem_post(config, url_imagem, titulo_post, url_logo, fonte_texto=Non
         return None
 
 def publicar_redes_sociais(config, url_imagem, titulo, resumo, hashtags):
-    """Publica nas redes sociais com base nas configurações"""
+    """Publica nas redes sociais com base nas configurations"""
     resultados = {}
     
     # WordPress
@@ -456,12 +456,33 @@ def novo_cliente():
     return jsonify({'sucesso': True, 'cliente_id': cliente_id})
 
 # ==============================================================================
-# BLOCO 5: INICIALIZAÇÃO
+# BLOCO 5: ROTAS DE STATUS E HEALTH CHECK
 # ==============================================================================
 @app.route('/health')
 def health_check():
-    return "Sistema de automação personalizável está no ar.", 200
+    """Endpoint simples para verificar se a aplicação está rodando"""
+    return jsonify({
+        "status": "healthy", 
+        "service": "social_automation",
+        "timestamp": datetime.now().isoformat()
+    }), 200
 
+@app.route('/api/status')
+def api_status():
+    """Endpoint mais detalhado para verificar o status da API"""
+    client_count = len(configuracoes) if 'configuracoes' in globals() else 0
+    return jsonify({
+        "status": "online",
+        "service": "Sistema de Automação de Mídias Sociais",
+        "version": "2.3",
+        "timestamp": datetime.now().isoformat(),
+        "client_count": client_count,
+        "environment": "production"
+    }), 200
+
+# ==============================================================================
+# BLOCO 6: INICIALIZAÇÃO
+# ==============================================================================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=True)
