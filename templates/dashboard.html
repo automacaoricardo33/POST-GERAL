@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard - {{ config.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Dashboard - {{ config.nome }}</h1>
+        <nav>
+            <a href="/configurar">Configurações</a>
+            <a href="/logout">Sair</a>
+        </nav>
+    </header>
+    
+    <main>
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Configuração</h3>
+                <p>Status: {{ 'Completa' if config.wp_url else 'Pendente' }}</p>
+            </div>
+            <div class="stat-card">
+                <h3>Última Publicação</h3>
+                <p>Nenhuma ainda</p>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <h2>Ações Rápidas</h2>
+            <button onclick="testarWebhook()">Testar Webhook</button>
+            <button onclick="visualizarImagem()">Visualizar Modelo de Imagem</button>
+        </div>
+        
+        <div class="webhook-info">
+            <h2>Webhook de Configuração</h2>
+            <p>URL: <code>{{ request.host_url }}webhook-receiver</code></p>
+            <p>Método: POST</p>
+            <p>Formato do JSON:</p>
+            <pre>
+{
+  "cliente_id": "{{ cliente_id }}",
+  "post_id": "123",
+  "titulo": "Título da notícia",
+  "resumo": "Resumo da notícia...",
+  "imagem_destaque": "https://exemplo.com/imagem.jpg",
+  "hashtags": "#noticias #atualidades"
+}
+            </pre>
+        </div>
+    </main>
+    
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

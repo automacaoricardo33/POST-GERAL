@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Configurações - Sistema de Automação</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Configurações do Cliente</h1>
+        <nav>
+            <a href="/">Voltar</a>
+            <a href="/logout">Sair</a>
+        </nav>
+    </header>
+    
+    <main>
+        <form id="configForm">
+            <h2>Informações Básicas</h2>
+            <div class="form-group">
+                <label>Nome do Cliente:</label>
+                <input type="text" name="nome_cliente" value="{{ config.nome }}" required>
+            </div>
+            
+            <h2>Integração WordPress</h2>
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" name="wp_integracao" {% if config.wp_integracao %}checked{% endif %}>
+                    Ativar integração com WordPress
+                </label>
+            </div>
+            <div class="form-group">
+                <label>URL do WordPress:</label>
+                <input type="url" name="wp_url" value="{{ config.wp_url }}">
+            </div>
+            <div class="form-group">
+                <label>Usuário WordPress:</label>
+                <input type="text" name="wp_user" value="{{ config.wp_user }}">
+            </div>
+            <div class="form-group">
+                <label>Senha WordPress:</label>
+                <input type="password" name="wp_password" value="{{ config.wp_password }}">
+            </div>
+            
+            <h2>Integração com Redes Sociais</h2>
+            <div class="form-group">
+                <label>Token Meta API:</label>
+                <input type="text" name="meta_token" value="{{ config.meta_token }}">
+            </div>
+            
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" name="instagram_integracao" {% if config.instagram_integracao %}checked{% endif %}>
+                    Ativar Instagram
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Instagram Business ID:</label>
+                <input type="text" name="instagram_id" value="{{ config.instagram_id }}">
+            </div>
+            
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" name="facebook_integracao" {% if config.facebook_integracao %}checked{% endif %}>
+                    Ativar Facebook
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Facebook Page ID:</label>
+                <input type="text" name="facebook_page_id" value="{{ config.facebook_page_id }}">
+            </div>
+            
+            <h2>Design da Imagem</h2>
+            <div class="form-group">
+                <label>URL do Logo:</label>
+                <input type="url" name="url_logo" value="{{ config.url_logo }}" required>
+            </div>
+            
+            <div class="color-pickers">
+                <div class="form-group">
+                    <label>Cor de Fundo:</label>
+                    <input type="color" name="cor_fundo" value="{{ config.cor_fundo }}">
+                </div>
+                <div class="form-group">
+                    <label>Cor do Texto:</label>
+                    <input type="color" name="cor_texto" value="{{ config.cor_texto }}">
+                </div>
+                <div class="form-group">
+                    <label>Cor de Destaque:</label>
+                    <input type="color" name="cor_destaque" value="{{ config.cor_destaque }}">
+                </div>
+                <div class="form-group">
+                    <label>Cor da Borda:</label>
+                    <input type="color" name="cor_borda" value="{{ config.cor_borda }}">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Espessura da Borda:</label>
+                <input type="number" name="espessura_borda" value="{{ config.espessura_borda }}" min="0" max="20">
+            </div>
+            
+            <div class="form-group">
+                <label>Arredondamento da Borda:</label>
+                <input type="number" name="arredondamento_borda" value="{{ config.arredondamento_borda }}" min="0" max="50">
+            </div>
+            
+            <div class="form-group">
+                <label>Texto do Rodapé:</label>
+                <input type="text" name="texto_rodape" value="{{ config.texto_rodape }}">
+            </div>
+            
+            <div class="form-group">
+                <label>Hashtags Padrão:</label>
+                <input type="text" name="hashtags_padrao" value="{{ config.hashtags_padrao }}">
+            </div>
+            
+            <div class="form-group">
+                <label>Fonte do Título:</label>
+                <input type="text" name="fonte_titulo" value="{{ config.fonte_titulo }}" placeholder="ex: Arial, Anton-Regular.ttf">
+            </div>
+            
+            <div class="form-group">
+                <label>Tamanho da Fonte do Título:</label>
+                <input type="number" name="tamanho_fonte_titulo" value="{{ config.tamanho_fonte_titulo }}">
+            </div>
+            
+            <div class="form-group">
+                <label>Fonte do Rodapé:</label>
+                <input type="text" name="fonte_rodape" value="{{ config.fonte_rodape }}" placeholder="ex: Arial, Anton-Regular.ttf">
+            </div>
+            
+            <div class="form-group">
+                <label>Tamanho da Fonte do Rodapé:</label>
+                <input type="number" name="tamanho_fonte_rodape" value="{{ config.tamanho_fonte_rodape }}">
+            </div>
+            
+            <button type="submit">Salvar Configurações</button>
+        </form>
+    </main>
+    
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login - Sistema de Automação</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="login-container">
+        <h1>Sistema de Automação de Mídias Sociais</h1>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Cliente ID:</label>
+                <input type="text" name="cliente_id" required>
+            </div>
+            <div class="form-group">
+                <label>Usuário:</label>
+                <input type="text" name="username" value="admin" required>
+            </div>
+            <div class="form-group">
+                <label>Senha:</label>
+                <input type="password" name="password" value="admin" required>
+            </div>
+            <button type="submit">Entrar</button>
+        </form>
+        <div id="message"></div>
+    </div>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
