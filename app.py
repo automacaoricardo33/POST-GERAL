@@ -107,9 +107,13 @@ configuracoes = carregar_configuracoes()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def upload_arquivo(arquivo, pasta):
+def upload_arquivo(arquivo, pasta, cliente_id=None):
     if arquivo and allowed_file(arquivo.filename):
-        filename = f"{uuid.uuid4().hex}_{arquivo.filename}"
+        if cliente_id:
+            filename = f"{cliente_id}_{uuid.uuid4().hex[:8]}_{arquivo.filename}"
+        else:
+            filename = f"{uuid.uuid4().hex}_{arquivo.filename}"
+            
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], pasta, filename)
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         arquivo.save(filepath)
@@ -174,19 +178,27 @@ def hex_para_rgb(cor_hex):
     cor_hex = cor_hex.lstrip('#')
     return tuple(int(cor_hex[i:i+2], 16) for i in (0, 2, 4))
 
-def carregar_fonte(caminho_fonte, tamanho):
+def carregar_fonte(caminho_fonte, tamanho, cliente_id=None):
     """Carrega uma fonte do sistema ou da pasta de uploads"""
     try:
-        # Primeiro tenta carregar da pasta de uploads
-        if os.path.exists(os.path.join(UPLOAD_FOLDER, 'fonts', caminho_fonte)):
-            return ImageFont.truetype(os.path.join(UPLOAD_FOLDER, 'fonts', caminho_fonte), tamanho)
+        # Primeiro tenta carregar da pasta de uploads do cliente específico
+        if cliente_id:
+            cliente_font_path = os.path.join(UPLOAD_FOLDER, 'fonts', f"{cliente_id}_{caminho_fonte}")
+            if os.path.exists(cliente_font_path):
+                return ImageFont.truetype(cliente_font_path, tamanho)
+        
+        # Tenta carregar da pasta geral de fonts
+        fontes_path = os.path.join(UPLOAD_FOLDER, 'fonts', caminho_fonte)
+        if os.path.exists(fontes_path):
+            return ImageFont.truetype(fontes_path, tamanho)
+        
         # Se não encontrar, tenta carregar do sistema
         return ImageFont.truetype(caminho_fonte, tamanho)
     except:
         # Fallback para fonte padrão
         return ImageFont.load_default()
 
-def criar_imagem_post(config, url_imagem, titulo_post, categoria=None):
+def criar_imagem_post(config, url_imagem, titulo_post, categoria=None, cliente_id=None):
     """Cria imagem personalizada com base nas configurações do cliente"""
     print("🎨 Iniciando criação da imagem personalizada...")
     
@@ -194,16 +206,28 @@ def criar_imagem_post(config, url_imagem, titulo_post, categoria=None):
         # Baixar imagens
         imagem_noticia = baixar_imagem(url_imagem)
         
-        # Carregar logo
+        # Carregar logo - prioriza logo específico do cliente
         logo_filename = config.get('logo_filename')
+        logo = None
+        
         if logo_filename:
-            logo_path = os.path.join(UPLOAD_FOLDER, 'logos', logo_filename)
-            logo = Image.open(logo_path).convert("RGBA")
-        else:
-            # Fallback para logo padrão se não houver
+            # Primeiro tenta carregar da pasta do cliente específico
+            if cliente_id:
+                cliente_logo_path = os.path.join(UPLOAD_FOLDER, 'logos', f"{cliente_id}_{logo_filename}")
+                if os.path.exists(cliente_logo_path):
+                    logo = Image.open(cliente_logo_path).convert("RGBA")
+            
+            # Se não encontrou logo específico do cliente, tenta o geral
+            if logo is None:
+                geral_logo_path = os.path.join(UPLOAD_FOLDER, 'logos', logo_filename)
+                if os.path.exists(geral_logo_path):
+                    logo = Image.open(geral_logo_path).convert("RGBA")
+        
+        # Fallback para logo padrão se não houver
+        if logo is None:
             logo = Image.new('RGBA', (100, 100), (255, 0, 0, 255))
         
-        if not imagem_noticia or not logo:
+        if not imagem_noticia:
             return None
 
         # Configurações de design do cliente
@@ -215,14 +239,14 @@ def criar_imagem_post(config, url_imagem, titulo_post, categoria=None):
         espessura_borda = config.get('espessura_borda', 5)
         arredondamento_borda = config.get('arredondamento_borda', 20)
         
-        # Carregar fontes
+        # Carregar fontes - prioriza fontes específicas do cliente
         fonte_titulo_nome = config.get('fonte_titulo', 'Arial')
         fonte_rodape_nome = config.get('fonte_rodape', 'Arial')
         tamanho_fonte_titulo = config.get('tamanho_fonte_titulo', 50)
         tamanho_fonte_rodape = config.get('tamanho_fonte_rodape', 30)
         
-        fonte_titulo = carregar_fonte(fonte_titulo_nome, tamanho_fonte_titulo)
-        fonte_rodape = carregar_fonte(fonte_rodape_nome, tamanho_fonte_rodape)
+        fonte_titulo = carregar_fonte(fonte_titulo_nome, tamanho_fonte_titulo, cliente_id)
+        fonte_rodape = carregar_fonte(fonte_rodape_nome, tamanho_fonte_rodape, cliente_id)
 
         # Criar imagem base
         imagem_final = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), hex_para_rgb(cor_fundo) + (255,))
@@ -233,7 +257,7 @@ def criar_imagem_post(config, url_imagem, titulo_post, categoria=None):
         if categoria:
             altura_faixa = 40
             draw.rectangle([(0, 0), (IMG_WIDTH, altura_faixa)], fill=hex_para_rgb(cor_categoria))
-            fonte_categoria = carregar_fonte(fonte_titulo_nome, 25)
+            fonte_categoria = carregar_fonte(fonte_titulo_nome, 25, cliente_id)
             texto_categoria = categoria.upper()
             draw.text((IMG_WIDTH / 2, altura_faixa / 2), texto_categoria, font=fonte_categoria, 
                      fill=hex_para_rgb(cor_texto), anchor="mm")
@@ -455,7 +479,16 @@ def index():
     feeds = c.fetchall()
     conn.close()
     
-    return render_template('dashboard.html', config=config, cliente_id=cliente_id, feeds=feeds)
+    # Verificar se a configuração está completa
+    config_completa = all([
+        config.get('nome'),
+        config.get('logo_filename'),
+        config.get('fonte_titulo'),
+        config.get('fonte_rodape')
+    ])
+    
+    return render_template('dashboard.html', config=config, cliente_id=cliente_id, 
+                          feeds=feeds, config_completa=config_completa)
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -525,13 +558,13 @@ def configurar():
         fonte_rodape_filename = None
         
         if logo_arquivo and allowed_file(logo_arquivo.filename):
-            logo_filename = upload_arquivo(logo_arquivo, 'logos')
+            logo_filename = upload_arquivo(logo_arquivo, 'logos', cliente_id)
         
         if fonte_titulo_arquivo and allowed_file(fonte_titulo_arquivo.filename):
-            fonte_titulo_filename = upload_arquivo(fonte_titulo_arquivo, 'fonts')
+            fonte_titulo_filename = upload_arquivo(fonte_titulo_arquivo, 'fonts', cliente_id)
         
         if fonte_rodape_arquivo and allowed_file(fonte_rodape_arquivo.filename):
-            fonte_rodape_filename = upload_arquivo(fonte_rodape_arquivo, 'fonts')
+            fonte_rodape_filename = upload_arquivo(fonte_rodape_arquivo, 'fonts', cliente_id)
         
         # Salvar configurações
         nova_config = {
@@ -579,13 +612,19 @@ def configurar():
     
     config = configuracoes.get(cliente_id, {})
     
-    # Listar fontes disponíveis
+    # Listar fontes disponíveis (do cliente específico)
     fontes_disponiveis = []
     fontes_path = os.path.join(UPLOAD_FOLDER, 'fonts')
     if os.path.exists(fontes_path):
-        fontes_disponiveis = [f for f in os.listdir(fontes_path) if f.endswith(('.ttf', '.otf'))]
+        # Filtrar fontes do cliente específico
+        fontes_cliente = [f for f in os.listdir(fontes_path) if f.startswith(f"{cliente_id}_")]
+        fontes_disponiveis.extend([f.replace(f"{cliente_id}_", "") for f in fontes_cliente])
+        
+        # Adicionar fontes gerais (sem prefixo de cliente)
+        fontes_gerais = [f for f in os.listdir(fontes_path) if not any(f.startswith(f"cliente_") for f in [f])]
+        fontes_disponiveis.extend(fontes_gerais)
     
-    return render_template('configurar.html', config=config, fontes_disponiveis=fontes_disponiveis)
+    return render_template('configurar.html', config=config, fontes_disponiveis=fontes_disponiveis, cliente_id=cliente_id)
 
 @app.route('/uploads/<path:filename>')
 def download_file(filename):
@@ -657,7 +696,7 @@ def webhook_receiver():
         print(f"✅ Processando post ID: {post_id} para o cliente: {cliente_id}")
         
         # Criar imagem
-        imagem_bytes = criar_imagem_post(config, url_imagem_destaque, titulo_noticia, categoria)
+        imagem_bytes = criar_imagem_post(config, url_imagem_destaque, titulo_noticia, categoria, cliente_id)
         if not imagem_bytes:
             return jsonify({"status": "erro", "mensagem": "Falha ao criar imagem"}), 500
         
@@ -706,6 +745,64 @@ def testar_feed():
         return jsonify({'sucesso': True, 'noticias': noticias})
     except Exception as e:
         return jsonify({'sucesso': False, 'erro': str(e)}), 500
+
+@app.route('/testar-webhook', methods=['POST'])
+def testar_webhook():
+    if 'cliente_id' not in session:
+        return jsonify({'sucesso': False, 'erro': 'Não autorizado'}), 403
+    
+    cliente_id = session['cliente_id']
+    config = configuracoes.get(cliente_id, {})
+    
+    # Dados de teste para o webhook
+    dados_teste = {
+        "cliente_id": cliente_id,
+        "post_id": "999",
+        "titulo": "Teste de Webhook - Notícia de Exemplo",
+        "resumo": "Esta é uma publicação de teste gerada pelo sistema de automação.",
+        "imagem_destaque": "https://via.placeholder.com/1080x551.png?text=Imagem+de+Teste",
+        "categoria": "urgente",
+        "hashtags": "#teste #automacao #webhook"
+    }
+    
+    # Chamar o webhook receiver internamente
+    with app.test_client() as client:
+        response = client.post('/webhook-receiver', 
+                             json=dados_teste,
+                             content_type='application/json')
+    
+    return jsonify({
+        'sucesso': response.status_code == 200,
+        'status_code': response.status_code,
+        'resposta': response.get_json()
+    })
+
+@app.route('/visualizar-imagem', methods=['POST'])
+def visualizar_imagem():
+    if 'cliente_id' not in session:
+        return jsonify({'sucesso': False, 'erro': 'Não autorizado'}), 403
+    
+    cliente_id = session['cliente_id']
+    config = configuracoes.get(cliente_id, {})
+    
+    # Dados de teste para visualização
+    url_imagem_teste = "https://via.placeholder.com/1080x551.png?text=Imagem+de+Exemplo"
+    titulo_teste = "Título de exemplo para teste de visualização"
+    categoria_teste = "urgente"
+    
+    # Criar imagem
+    imagem_bytes = criar_imagem_post(config, url_imagem_teste, titulo_teste, categoria_teste, cliente_id)
+    
+    if not imagem_bytes:
+        return jsonify({'sucesso': False, 'erro': 'Falha ao criar imagem'}), 500
+    
+    # Retornar a imagem em base64 para visualização
+    imagem_base64 = b64encode(imagem_bytes).decode('utf-8')
+    
+    return jsonify({
+        'sucesso': True,
+        'imagem': f"data:image/jpeg;base64,{imagem_base64}"
+    })
 
 # ==============================================================================
 # BLOCO 5: ROTAS DE STATUS E HEALTH CHECK
