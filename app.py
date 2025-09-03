@@ -18,8 +18,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
-import feedparser
-import xml.etree.ElementTree as ET
 
 # ==============================================================================
 # BLOCO 2: CONFIGURAÇÃO INICIAL
@@ -362,37 +360,53 @@ def publicar_redes_sociais(config, url_imagem, titulo, resumo, hashtags):
     return resultados
 
 def processar_feed_rss(url_feed, limite=5):
-    """Processa um feed RSS e retorna as últimas notícias"""
+    """Processa um feed RSS usando BeautifulSoup em vez de feedparser"""
     try:
-        feed = feedparser.parse(url_feed)
+        response = requests.get(url_feed, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'xml')
         noticias = []
         
-        for entrada in feed.entries[:limite]:
+        for entrada in soup.find_all('item')[:limite]:
+            # Extrair informações básicas
+            titulo = entrada.find('title')
+            resumo = entrada.find('description')
+            link = entrada.find('link')
+            data = entrada.find('pubDate')
+            
+            # Tentar encontrar uma imagem
+            imagem = None
+            
+            # Verificar tag media:content
+            media_content = entrada.find('media:content')
+            if media_content and media_content.get('url'):
+                imagem = media_content.get('url')
+            
+            # Verificar tag enclosure
+            if not imagem:
+                enclosure = entrada.find('enclosure')
+                if enclosure and 'image' in enclosure.get('type', ''):
+                    imagem = enclosure.get('url')
+            
+            # Procurar imagem no conteúdo
+            if not imagem:
+                content = entrada.find('content:encoded')
+                if not content:
+                    content = resumo
+                if content:
+                    content_soup = BeautifulSoup(content.text, 'html.parser')
+                    img = content_soup.find('img')
+                    if img:
+                        imagem = img.get('src')
+            
             noticia = {
-                'titulo': entrada.title,
-                'resumo': entrada.summary if hasattr(entrada, 'summary') else '',
-                'link': entrada.link,
-                'data': entrada.published if hasattr(entrada, 'published') else '',
-                'imagem': None
+                'titulo': titulo.text if titulo else 'Sem título',
+                'resumo': resumo.text if resumo else '',
+                'link': link.text if link else '',
+                'data': data.text if data else '',
+                'imagem': imagem
             }
-            
-            # Tentar encontrar uma imagem na notícia
-            if hasattr(entrada, 'links'):
-                for link in entrada.links:
-                    if link.rel == 'enclosure' and 'image' in link.type:
-                        noticia['imagem'] = link.href
-                        break
-            
-            # Se não encontrou imagem, procurar no conteúdo
-            if not noticia['imagem'] and hasattr(entrada, 'content'):
-                for content in entrada.content:
-                    if 'value' in content:
-                        soup = BeautifulSoup(content.value, 'html.parser')
-                        img = soup.find('img')
-                        if img and img.get('src'):
-                            noticia['imagem'] = img.get('src')
-                            break
-            
             noticias.append(noticia)
         
         return noticias
