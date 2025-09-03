@@ -5,36 +5,77 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Sistema de Automação</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f8f9fa;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         .login-container {
-            background-color: white;
-            padding: 2rem;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 2.5rem;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
             width: 100%;
-            max-width: 400px;
+            max-width: 450px;
+            backdrop-filter: blur(10px);
         }
         .logo {
             text-align: center;
-            margin-bottom: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .logo h2 {
+            color: #333;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .logo p {
+            color: #666;
+            font-size: 1.1rem;
+        }
+        .form-control {
+            border-radius: 8px;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s;
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
         .form-text {
             font-size: 0.85rem;
             color: #6c757d;
+        }
+        .info-box {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            border-left: 4px solid #667eea;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
         <div class="logo">
-            <h2>🔄 Sistema de Automação</h2>
+            <h2><i class="fas fa-robot"></i> Sistema de Automação</h2>
             <p class="text-muted">Automação de Mídias Sociais</p>
         </div>
         
@@ -49,27 +90,28 @@
             </div>
             
             <div class="mb-3">
-                <label for="username" class="form-label">Usuário *</label>
+                <label for="username" class="form-label">Usuário</label>
                 <input type="text" class="form-control" id="username" name="username" 
                        value="admin" required>
             </div>
             
             <div class="mb-3">
-                <label for="password" class="form-label">Senha *</label>
+                <label for="password" class="form-label">Senha</label>
                 <input type="password" class="form-control" id="password" name="password" 
                        value="admin" required>
             </div>
             
-            <button type="submit" class="btn btn-primary w-100">Entrar</button>
+            <button type="submit" class="btn btn-primary w-100">
+                <i class="fas fa-sign-in-alt"></i> Entrar
+            </button>
         </form>
         
         <div id="message" class="mt-3"></div>
         
-        <div class="mt-3 text-center">
-            <small class="text-muted">
-                Credenciais padrão: admin / admin<br>
-                Na primeira vez, deixe o Cliente ID em branco
-            </small>
+        <div class="info-box">
+            <h6><i class="fas fa-info-circle"></i> Informações de Login</h6>
+            <p class="mb-1">Credenciais padrão: <strong>admin / admin</strong></p>
+            <p class="mb-0">Na primeira vez, deixe o Cliente ID em branco para criar um novo cliente automaticamente.</p>
         </div>
     </div>
 
@@ -79,7 +121,7 @@
             
             const formData = new FormData(this);
             const messageDiv = document.getElementById('message');
-            messageDiv.innerHTML = '<div class="alert alert-info">Processando...</div>';
+            messageDiv.innerHTML = '<div class="alert alert-info"><i class="fas fa-spinner fa-spin"></i> Processando...</div>';
             
             try {
                 const response = await fetch('/login', {
@@ -90,16 +132,16 @@
                 const result = await response.json();
                 
                 if (result.sucesso) {
-                    messageDiv.innerHTML = '<div class="alert alert-success">Login realizado com sucesso! Redirecionando...</div>';
+                    messageDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check-circle"></i> Login realizado com sucesso! Redirecionando...</div>';
                     // Redirecionar para a dashboard após 1 segundo
                     setTimeout(() => {
                         window.location.href = '/';
                     }, 1000);
                 } else {
-                    messageDiv.innerHTML = `<div class="alert alert-danger">${result.erro}</div>`;
+                    messageDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> ${result.erro}</div>`;
                 }
             } catch (error) {
-                messageDiv.innerHTML = '<div class="alert alert-danger">Erro de conexão. Tente novamente.</div>';
+                messageDiv.innerHTML = '<div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> Erro de conexão. Tente novamente.</div>';
             }
         });
     </script>
