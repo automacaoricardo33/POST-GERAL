@@ -217,7 +217,7 @@ def criar_imagem_post(config, url_imagem, titulo_post, url_logo, fonte_texto=Non
         return None
 
 def publicar_redes_sociais(config, url_imagem, titulo, resumo, hashtags):
-    """Publica nas redes sociais com base nas configurations"""
+    """Publica nas redes sociais com base nas configurações"""
     resultados = {}
     
     # WordPress
