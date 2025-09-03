@@ -66,10 +66,18 @@ CONFIG_FILE = 'clientes_config.json'
 
 # Carregar configurações dos clientes
 def carregar_configuracoes():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if content:  # Verifica se o arquivo não está vazio
+                    return json.loads(content)
+        # Se o arquivo não existe ou está vazio, retorna um dicionário vazio
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"❌ Erro ao decodificar JSON do arquivo de configuração: {e}")
+        # Se houver erro de decodificação, retorna um dicionário vazio
+        return {}
 
 def salvar_configuracoes(config):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -77,6 +85,11 @@ def salvar_configuracoes(config):
 
 # Configurações iniciais
 configuracoes = carregar_configuracoes()
+
+# Se o arquivo de configuração não existir ou estiver vazio, cria um novo
+if not configuracoes:
+    print("📝 Criando arquivo de configuração inicial...")
+    salvar_configuracoes({})
 
 # ==============================================================================
 # BLOCO 3: FUNÇÕES AUXILIARES
@@ -283,7 +296,7 @@ def publicar_redes_sociais(config, url_imagem, titulo, resumo, hashtags):
         if all([meta_token, facebook_page_id]):
             try:
                 url_post_foto = f"https://graph.facebook.com/v19.0/{facebook_page_id}/photos"
-                legenda = f"{titulo}\n\n{resumo}\n\n{hashtags}"
+                legenda = f"{titulo}\n\n{resumo}\n\n{hashtags}
                 params = {'url': url_imagem, 'message': legenda, 'access_token': meta_token}
                 r = requests.post(url_post_foto, params=params, timeout=20)
                 r.raise_for_status()
