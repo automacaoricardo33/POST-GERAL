@@ -27,6 +27,93 @@ cloudinary.config(
     api_secret=os.getenv('CLOUDINARY_API_SECRET')
 )
 
+# --- LÓGICA DE GERAÇÃO DE IMAGEM ---
+
+def baixar_arquivo_url(url):
+    """Baixa um arquivo (imagem ou fonte) de uma URL e retorna em bytes."""
+    try:
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        return io.BytesIO(response.content)
+    except requests.RequestException as e:
+        print(f"Erro ao baixar o arquivo da URL {url}: {e}")
+        return None
+
+def gerar_imagem_noticia(titulo, texto, config_cliente):
+    """
+    Gera uma imagem de notícia personalizada com base na configuração do cliente.
+    Esta função agora lida com URLs para logos e fontes.
+    """
+    # 1. VALIDAÇÃO E CONFIGURAÇÃO
+    largura, altura = 1080, 1080
+    cor_fundo = config_cliente.get('cor_fundo', '#ffffff')
+    cor_texto_titulo = config_cliente.get('cor_texto_titulo', '#000000')
+    cor_texto_noticia = config_cliente.get('cor_texto_noticia', '#333333')
+    
+    logo_url = config_cliente.get('logo_url')
+    font_url_titulo = config_cliente.get('font_url_titulo')
+    font_url_texto = config_cliente.get('font_url_texto')
+
+    if not all([logo_url, font_url_titulo, font_url_texto]):
+        raise ValueError("Configuração incompleta: Faltam URLs para logo ou fontes.")
+
+    # 2. BAIXAR ARQUIVOS DA NUVEM
+    logo_bytes = baixar_arquivo_url(logo_url)
+    fonte_titulo_bytes = baixar_arquivo_url(font_url_titulo)
+    fonte_texto_bytes = baixar_arquivo_url(font_url_texto)
+
+    if not all([logo_bytes, fonte_titulo_bytes, fonte_texto_bytes]):
+        raise RuntimeError("Falha ao baixar um ou mais arquivos essenciais (logo, fontes) do Cloudinary.")
+
+    # 3. CRIAÇÃO DA IMAGEM
+    imagem = Image.new('RGB', (largura, altura), color=cor_fundo)
+    draw = ImageDraw.Draw(imagem)
+
+    # 4. CARREGAR FONTES
+    tamanho_fonte_titulo = int(config_cliente.get('tamanho_fonte_titulo', 60))
+    tamanho_fonte_texto = int(config_cliente.get('tamanho_fonte_texto', 40))
+    
+    fonte_titulo_bytes.seek(0)
+    fonte_texto_bytes.seek(0)
+    
+    fonte_titulo = ImageFont.truetype(fonte_titulo_bytes, tamanho_fonte_titulo)
+    fonte_texto = ImageFont.truetype(fonte_texto_bytes, tamanho_fonte_texto)
+
+    # 5. ADICIONAR TEXTO (com quebra de linha)
+    padding = 60
+    max_largura_texto = largura - 2 * padding
+    
+    # Título
+    linhas_titulo = textwrap.wrap(titulo, width=int(max_largura_texto / (tamanho_fonte_titulo * 0.5)))
+    y_titulo = 150
+    for linha in linhas_titulo:
+        draw.text((padding, y_titulo), linha, font=fonte_titulo, fill=cor_texto_titulo)
+        y_titulo += fonte_titulo.getbbox(linha)[3] + 10
+        
+    # Texto/Resumo
+    y_texto = y_titulo + 40
+    linhas_texto = textwrap.wrap(texto, width=int(max_largura_texto / (tamanho_fonte_texto * 0.6)))
+    for linha in linhas_texto:
+        draw.text((padding, y_texto), linha, font=fonte_texto, fill=cor_texto_noticia)
+        y_texto += fonte_texto.getbbox(linha)[3] + 10
+
+    # 6. ADICIONAR LOGO
+    logo_bytes.seek(0)
+    logo_img = Image.open(logo_bytes)
+    tamanho_logo = int(config_cliente.get('tamanho_logo', 200))
+    logo_img.thumbnail((tamanho_logo, tamanho_logo))
+    
+    pos_x = int(config_cliente.get('posicao_logo_x', largura - tamanho_logo - padding))
+    pos_y = int(config_cliente.get('posicao_logo_y', altura - logo_img.height - padding))
+    
+    # Usa a própria logo como máscara se for PNG com transparência
+    if logo_img.mode == 'RGBA':
+        imagem.paste(logo_img, (pos_x, pos_y), logo_img)
+    else:
+        imagem.paste(logo_img, (pos_x, pos_y))
+
+    return imagem
+
 # --- BANCO DE DADOS POSTGRESQL ---
 
 def get_db_connection():
@@ -86,9 +173,10 @@ def dashboard():
         feeds = cur.fetchall()
     conn.close()
     
-    config_completa = cliente['config'] and cliente['config'].get('logo_url') and cliente['config'].get('font_url_titulo')
+    config = cliente['config'] or {}
+    config_completa = all(k in config and config[k] for k in ['logo_url', 'font_url_titulo', 'font_url_texto'])
     
-    return render_template('dashboard.html', config=cliente['config'], cliente_id=cliente_id, 
+    return render_template('dashboard.html', config=config, cliente_id=cliente_id, 
                            feeds=feeds, config_completa=config_completa)
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -148,11 +236,11 @@ def configurar():
         try:
             with conn.cursor(cursor_factory=DictCursor) as cur:
                 cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
-                config_atual = cur.fetchone()['config']
+                config_atual = cur.fetchone()['config'] or {}
 
             config_atual['nome'] = request.form.get('nome')
             
-            # ESTA É A PARTE CORRIGIDA: Upload para Cloudinary
+            # Upload para Cloudinary
             for tipo in ['logo', 'fonte_titulo', 'fonte_texto']:
                 if tipo in request.files and request.files[tipo].filename != '':
                     arquivo = request.files[tipo]
@@ -167,14 +255,14 @@ def configurar():
                     except Exception as e:
                         flash(f"Erro ao enviar {tipo} para o Cloudinary: {str(e)}", "danger")
 
-            # Atualiza os outros campos do formulário
+            # Atualiza outros campos
             campos_form = ['cor_fundo', 'cor_texto_titulo', 'cor_texto_noticia', 
-                           'posicao_logo_x', 'posicao_logo_y', 'tamanho_logo']
+                           'posicao_logo_x', 'posicao_logo_y', 'tamanho_logo',
+                           'tamanho_fonte_titulo', 'tamanho_fonte_texto']
             for campo in campos_form:
                 if request.form.get(campo):
                     config_atual[campo] = request.form.get(campo)
             
-            # Salva tudo no banco de dados
             with conn.cursor() as cur:
                 cur.execute("UPDATE clientes SET nome = %s, config = %s WHERE id = %s",
                             (config_atual['nome'], json.dumps(config_atual), cliente_id))
@@ -195,7 +283,7 @@ def configurar():
             cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
             config = cur.fetchone()['config']
         conn.close()
-        return render_template('configurar.html', config=config, cliente_id=cliente_id)
+        return render_template('configurar.html', config=config or {}, cliente_id=cliente_id)
 
 @app.route('/adicionar_feed', methods=['POST'])
 def adicionar_feed():
@@ -216,12 +304,13 @@ def adicionar_feed():
     conn.commit()
     conn.close()
     flash("Feed adicionado com sucesso!", "success")
-    return jsonify(sucesso=True)
+    return redirect(url_for('dashboard'))
+
 
 @app.route('/remover_feed/<int:feed_id>', methods=['POST'])
 def remover_feed(feed_id):
     if 'cliente_id' not in session:
-        return jsonify(sucesso=False, erro='Não autenticado'), 401
+        return redirect(url_for('login'))
 
     conn = get_db_connection()
     with conn.cursor() as cur:
@@ -229,8 +318,7 @@ def remover_feed(feed_id):
     conn.commit()
     conn.close()
     flash("Feed removido.", "info")
-    return jsonify(sucesso=True)
-
+    return redirect(url_for('dashboard'))
 
 def initialize_app():
     """Função para ser chamada ANTES de iniciar o servidor Gunicorn no Render."""
@@ -238,5 +326,7 @@ def initialize_app():
     init_db()
 
 if __name__ == '__main__':
+    # Esta linha executa a inicialização quando rodamos localmente
+    initialize_app()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
