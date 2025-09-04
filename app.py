@@ -3,7 +3,7 @@ import json
 import requests
 import textwrap
 from flask import (Flask, request, jsonify, render_template, session,
-                   redirect, url_for, flash, send_file)
+                   redirect, url_for, flash)
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 import uuid
@@ -38,7 +38,7 @@ def get_db_connection():
     return conn
 
 def init_db():
-    """Cria as tabelas do banco de dados (clientes e feeds) se elas ainda não existirem."""
+    """Cria as tabelas do banco de dados se elas ainda não existirem."""
     conn = get_db_connection()
     with conn.cursor() as cur:
         cur.execute('''
@@ -152,6 +152,7 @@ def configurar():
 
             config_atual['nome'] = request.form.get('nome')
             
+            # ESTA É A PARTE CORRIGIDA: Upload para Cloudinary
             for tipo in ['logo', 'fonte_titulo', 'fonte_texto']:
                 if tipo in request.files and request.files[tipo].filename != '':
                     arquivo = request.files[tipo]
@@ -164,14 +165,16 @@ def configurar():
                         config_atual[f'{tipo}_url'] = upload_result.get('secure_url')
                         flash(f"{tipo.replace('_', ' ').capitalize()} enviado com sucesso!", "info")
                     except Exception as e:
-                        flash(f"Erro ao enviar {tipo}: {str(e)}", "danger")
+                        flash(f"Erro ao enviar {tipo} para o Cloudinary: {str(e)}", "danger")
 
+            # Atualiza os outros campos do formulário
             campos_form = ['cor_fundo', 'cor_texto_titulo', 'cor_texto_noticia', 
                            'posicao_logo_x', 'posicao_logo_y', 'tamanho_logo']
             for campo in campos_form:
                 if request.form.get(campo):
                     config_atual[campo] = request.form.get(campo)
             
+            # Salva tudo no banco de dados
             with conn.cursor() as cur:
                 cur.execute("UPDATE clientes SET nome = %s, config = %s WHERE id = %s",
                             (config_atual['nome'], json.dumps(config_atual), cliente_id))
@@ -179,9 +182,10 @@ def configurar():
             flash("Configurações salvas com sucesso!", "success")
 
         except Exception as e:
-            flash(f"Ocorreu um erro ao salvar: {str(e)}", "danger")
+            flash(f"Ocorreu um erro geral ao salvar: {str(e)}", "danger")
         finally:
-            conn.close()
+            if conn:
+                conn.close()
         
         return redirect(url_for('dashboard'))
 
@@ -193,8 +197,43 @@ def configurar():
         conn.close()
         return render_template('configurar.html', config=config, cliente_id=cliente_id)
 
-# --- Função de Inicialização ---
+@app.route('/adicionar_feed', methods=['POST'])
+def adicionar_feed():
+    if 'cliente_id' not in session:
+        return jsonify(sucesso=False, erro='Não autenticado'), 401
+    
+    cliente_id = session['cliente_id']
+    url_feed = request.form.get('url_feed')
+    tipo_feed = request.form.get('tipo_feed')
+
+    if not all([url_feed, tipo_feed]):
+        return jsonify(sucesso=False, erro='URL e tipo são obrigatórios'), 400
+
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO feeds (cliente_id, url, tipo) VALUES (%s, %s, %s)",
+                    (cliente_id, url_feed, tipo_feed))
+    conn.commit()
+    conn.close()
+    flash("Feed adicionado com sucesso!", "success")
+    return jsonify(sucesso=True)
+
+@app.route('/remover_feed/<int:feed_id>', methods=['POST'])
+def remover_feed(feed_id):
+    if 'cliente_id' not in session:
+        return jsonify(sucesso=False, erro='Não autenticado'), 401
+
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM feeds WHERE id = %s AND cliente_id = %s", (feed_id, session['cliente_id']))
+    conn.commit()
+    conn.close()
+    flash("Feed removido.", "info")
+    return jsonify(sucesso=True)
+
+
 def initialize_app():
+    """Função para ser chamada ANTES de iniciar o servidor Gunicorn no Render."""
     print("🚀 Executando inicialização da aplicação...")
     init_db()
 
