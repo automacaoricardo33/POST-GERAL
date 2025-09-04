@@ -1,4 +1,3 @@
-{% raw %}
 {% extends 'layout.html' %}
 
 {% block title %}Dashboard - {{ config.nome or 'Cliente' }}{% endblock %}
@@ -16,6 +15,28 @@
         {% endif %}
     {% endwith %}
 
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Configuração</h5>
+                    <p>Status: <span class="badge bg-{{ 'success' if config_completa else 'warning' }}">
+                        {{ 'Completa' if config_completa else 'Pendente' }}
+                    </span></p>
+                    <p class="card-text"><a href="{{ url_for('configurar') }}" class="btn btn-sm btn-outline-primary">Editar Configurações</a></p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Próxima Execução</h5>
+                    <p class="card-text">O robô verifica os feeds periodicamente (conforme configurado no Render).</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <div class="row">
         <div class="col-md-7">
             <h3>Feeds Configurados</h3>
@@ -84,7 +105,6 @@
     feedForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         
-        // Feedback visual
         submitBtn.disabled = true;
         btnSpinner.classList.remove('d-none');
         formFeedback.innerHTML = '';
@@ -98,16 +118,14 @@
             const result = await response.json();
             
             if (response.ok && result.sucesso) {
-                formFeedback.innerHTML = `<div class="alert alert-success">${result.mensagem}</div>`;
-                // Recarrega a página inteira para ver a lista atualizada
-                setTimeout(() => location.reload(), 1000);
+                alert(result.mensagem || 'Feed adicionado com sucesso!');
+                location.reload();
             } else {
                 formFeedback.innerHTML = `<div class="alert alert-danger">${result.erro || 'Ocorreu um erro.'}</div>`;
             }
         } catch (error) {
             formFeedback.innerHTML = `<div class="alert alert-danger">Erro de conexão. Tente novamente.</div>`;
         } finally {
-            // Reabilita o botão
             submitBtn.disabled = false;
             btnSpinner.classList.add('d-none');
         }
@@ -124,13 +142,12 @@
             const result = await response.json();
 
             if (response.ok && result.sucesso) {
-                // Remove o card do feed da tela sem precisar recarregar a página
                 document.getElementById(`feed-card-${feedId}`).remove();
                 if (document.getElementById('feed-list').childElementCount === 0) {
                      document.getElementById('feed-list').innerHTML = '<p id="no-feeds-message">Nenhum feed configurado ainda.</p>';
                 }
             } else {
-                alert('Erro ao remover: ' + result.erro);
+                alert('Erro ao remover: ' + (result.erro || 'Erro desconhecido.'));
             }
         } catch (error) {
             alert('Erro de conexão ao tentar remover o feed.');
@@ -138,4 +155,3 @@
     }
 </script>
 {% endblock %}
-{% endraw %}
