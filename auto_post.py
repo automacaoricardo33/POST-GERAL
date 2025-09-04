@@ -1,37 +1,54 @@
-import sqlite3
+import os
 import json
 import feedparser
 import requests
-import os
 import uuid
 from time import sleep
-from app import gerar_imagem_noticia # Importa a função de gerar imagem do seu app
+from dotenv import load_dotenv
+from app import get_db_connection, gerar_imagem_noticia # Importa funções do app.py
+import cloudinary
+import cloudinary.uploader
+import psycopg2
+from psycopg2.extras import DictCursor
 
-DB_NAME = 'clientes.db'
-POSTED_LOG_FILE = 'posted_links.log'
-OUTPUT_FOLDER = 'output'
+# Carrega variáveis de ambiente
+load_dotenv()
 
-def get_db_connection():
-    """Cria uma conexão com o banco de dados."""
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    return conn
+# Configuração do Cloudinary
+cloudinary.config(
+    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
+    api_key=os.getenv('CLOUDINARY_API_KEY'),
+    api_secret=os.getenv('CLOUDINARY_API_SECRET')
+)
 
-def carregar_links_postados():
-    """Carrega os links que já foram postados para evitar duplicatas."""
-    if not os.path.exists(POSTED_LOG_FILE):
-        return set()
-    with open(POSTED_LOG_FILE, 'r', encoding='utf-8') as f:
-        return set(line.strip() for line in f)
+# Arquivo para armazenar links já postados (para fins de backup local)
+# A fonte da verdade será o banco de dados
+POSTED_LOG_FILE = 'posted_links.log' 
 
-def salvar_link_postado(link):
-    """Salva um novo link no arquivo de log."""
-    with open(POSTED_LOG_FILE, 'a', encoding='utf-8') as f:
-        f.write(link + '\n')
+def carregar_links_postados_db(conn):
+    """Carrega links postados a partir de uma tabela no DB."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS links_postados (
+                id SERIAL PRIMARY KEY,
+                link TEXT NOT NULL UNIQUE,
+                data_postagem TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("SELECT link FROM links_postados")
+        links = {row[0] for row in cur.fetchall()}
+    conn.commit()
+    return links
+
+def salvar_link_postado_db(conn, link):
+    """Salva um novo link no banco de dados."""
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO links_postados (link) VALUES (%s) ON CONFLICT (link) DO NOTHING", (link,))
+    conn.commit()
 
 def verificar_configuracao_completa(config):
     """Verifica se a configuração essencial do cliente foi preenchida."""
-    essenciais = ['nome', 'logo_path', 'font_path_titulo', 'font_path_texto']
+    essenciais = ['nome', 'logo_url', 'font_url_titulo', 'font_url_texto']
     return all(key in config and config[key] for key in essenciais)
 
 def processar_feed_rss(feed_url, links_postados):
@@ -47,7 +64,6 @@ def processar_feed_rss(feed_url, links_postados):
         for entry in noticias.entries:
             link = entry.get('link')
             titulo = entry.get('title')
-            # Tenta encontrar o melhor texto para o resumo
             texto = entry.get('summary') or entry.get('description', '')
 
             if not all([link, titulo, texto]):
@@ -67,15 +83,14 @@ def processar_feed_json(feed_url, links_postados):
     print(f"  Processando JSON: {feed_url}")
     try:
         response = requests.get(feed_url, timeout=10)
-        response.raise_for_status() # Lança um erro para status HTTP 4xx/5xx
+        response.raise_for_status()
         noticias = response.json()
 
         novos_posts = []
-        # Assumindo uma estrutura comum de JSON com uma lista de 'items' ou 'articles'
         items = noticias.get('items') or noticias.get('articles') or noticias
 
         if not isinstance(items, list):
-            print("    ERRO: O JSON não contém uma lista de notícias (procurei por 'items' ou 'articles').")
+            print("    ERRO: O JSON não contém uma lista de notícias.")
             return []
 
         for item in items:
@@ -106,79 +121,90 @@ def iniciar_automacao():
     """Função principal que roda o robô de postagem."""
     print("🤖 Iniciando robô de postagem automática...")
     
-    links_postados = carregar_links_postados()
-    print(f"Carregados {len(links_postados)} links já postados.")
-    
-    conn = get_db_connection()
-    clientes = conn.execute('SELECT id, config FROM clientes').fetchall()
-    
-    if not clientes:
-        print("Nenhum cliente encontrado no banco de dados. Encerrando.")
-        return
+    conn = None
+    try:
+        conn = get_db_connection()
+        links_postados = carregar_links_postados_db(conn)
+        print(f"Carregados {len(links_postados)} links já postados do banco de dados.")
 
-    for cliente in clientes:
-        cliente_id = cliente['id']
-        try:
-            config_cliente = json.loads(cliente['config'])
-        except (TypeError, json.JSONDecodeError):
-            print(f"\nAVISO: Cliente '{cliente_id}' não possui configuração válida. Pulando.")
-            continue
-            
-        nome_cliente = config_cliente.get('nome', cliente_id)
-        print(f"\n➡️  Verificando cliente: {nome_cliente}")
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute('SELECT id, config FROM clientes')
+            clientes = cur.fetchall()
+        
+        if not clientes:
+            print("Nenhum cliente encontrado no banco de dados. Encerrando.")
+            return
 
-        if not verificar_configuracao_completa(config_cliente):
-            print("  Configuração do cliente está incompleta (faltam logo, fontes, etc). Pulando.")
-            continue
+        for cliente in clientes:
+            cliente_id = cliente['id']
+            config_cliente = cliente['config'] or {}
+                
+            nome_cliente = config_cliente.get('nome', cliente_id)
+            print(f"\n➡️  Verificando cliente: {nome_cliente}")
 
-        feeds = conn.execute('SELECT * FROM feeds WHERE cliente_id = ?', (cliente_id,)).fetchall()
-        if not feeds:
-            print("  Nenhum feed RSS/JSON cadastrado para este cliente.")
-            continue
-
-        for feed in feeds:
-            posts_para_gerar = []
-            if feed['tipo'] == 'rss':
-                posts_para_gerar = processar_feed_rss(feed['url'], links_postados)
-            elif feed['tipo'] == 'json':
-                posts_para_gerar = processar_feed_json(feed['url'], links_postados)
-
-            if not posts_para_gerar:
-                print(f"    Nenhuma notícia nova encontrada em {feed['url']}.")
+            if not verificar_configuracao_completa(config_cliente):
+                print("  Configuração do cliente está incompleta (faltam logo, fontes, etc). Pulando.")
                 continue
 
-            print(f"    ✅ Encontradas {len(posts_para_gerar)} notícias novas!")
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute('SELECT * FROM feeds WHERE cliente_id = %s', (cliente_id,))
+                feeds = cur.fetchall()
             
-            # Criar pasta de saída para o cliente
-            pasta_saida_cliente = os.path.join(OUTPUT_FOLDER, cliente_id)
-            os.makedirs(pasta_saida_cliente, exist_ok=True)
-            
-            for post in reversed(posts_para_gerar): # Pega do mais antigo para o mais novo
-                try:
-                    print(f"      Gerando imagem para: '{post['titulo'][:50]}...'")
-                    
-                    # Gera a imagem usando a função do app.py
-                    imagem = gerar_imagem_noticia(post['titulo'], post['texto'], config_cliente)
-                    
-                    nome_arquivo = f"{uuid.uuid4().hex[:12]}.png"
-                    caminho_arquivo = os.path.join(pasta_saida_cliente, nome_arquivo)
-                    
-                    imagem.save(caminho_arquivo)
-                    print(f"      ✅ Imagem salva em: {caminho_arquivo}")
-                    
-                    # Se tudo deu certo, salva o link para não postar de novo
-                    salvar_link_postado(post['link'])
-                    links_postados.add(post['link'])
-                    
-                    sleep(2) # Pausa para não sobrecarregar
+            if not feeds:
+                print("  Nenhum feed RSS/JSON cadastrado para este cliente.")
+                continue
 
-                except Exception as e:
-                    print(f"      ❌ ERRO CRÍTICO ao gerar imagem para '{post['titulo']}'. Erro: {e}")
-                    print("      Verifique se os caminhos das fontes e do logo estão corretos na configuração.")
-                    break # Para de processar este feed se der um erro de imagem
+            for feed in feeds:
+                posts_para_gerar = []
+                if feed['tipo'] == 'rss':
+                    posts_para_gerar = processar_feed_rss(feed['url'], links_postados)
+                elif feed['tipo'] == 'json':
+                    posts_para_gerar = processar_feed_json(feed['url'], links_postados)
+
+                if not posts_para_gerar:
+                    print(f"    Nenhuma notícia nova encontrada em {feed['url']}.")
+                    continue
+
+                print(f"    ✅ Encontradas {len(posts_para_gerar)} notícias novas!")
+                
+                for post in reversed(posts_para_gerar):
+                    try:
+                        print(f"      Gerando imagem para: '{post['titulo'][:50]}...'")
+                        
+                        imagem = gerar_imagem_noticia(post['titulo'], post['texto'], config_cliente)
+                        
+                        # Salva a imagem em memória para enviar ao Cloudinary
+                        img_byte_arr = io.BytesIO()
+                        imagem.save(img_byte_arr, format='PNG')
+                        img_byte_arr.seek(0)
+
+                        # Envia para o Cloudinary
+                        upload_result = cloudinary.uploader.upload(
+                            img_byte_arr,
+                            folder=f"automacao/{cliente_id}/posts_gerados",
+                            public_id=f"post_{uuid.uuid4().hex[:12]}"
+                        )
+                        
+                        image_url = upload_result.get('secure_url')
+                        print(f"      ✅ Imagem enviada para o Cloudinary: {image_url}")
+                        
+                        # TODO: Adicionar aqui a lógica para postar a `image_url` nas redes sociais
+                        
+                        salvar_link_postado_db(conn, post['link'])
+                        links_postados.add(post['link'])
+                        
+                        sleep(2)
+
+                    except Exception as e:
+                        print(f"      ❌ ERRO CRÍTICO ao gerar ou enviar imagem para '{post['titulo']}'. Erro: {e}")
+                        break
     
-    conn.close()
-    print("\n🏁 Robô finalizou a verificação.")
+    except (psycopg2.Error, ValueError) as e:
+        print(f"ERRO DE BANCO DE DADOS: {e}")
+    finally:
+        if conn:
+            conn.close()
+        print("\n🏁 Robô finalizou a verificação.")
 
 
 if __name__ == '__main__':
