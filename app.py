@@ -77,7 +77,7 @@ def dashboard():
 
     if not cliente:
         session.clear()
-        flash("Sua sessão era inválida. Por favor, faça login novamente.", "warning")
+        flash("Sua sessão era inválida ou o cliente não foi encontrado. Por favor, faça login novamente.", "warning")
         conn.close()
         return redirect(url_for('login'))
 
@@ -142,12 +142,13 @@ def configurar():
         return redirect(url_for('login'))
     
     cliente_id = session['cliente_id']
-    conn = get_db_connection()
-    with conn.cursor(cursor_factory=DictCursor) as cur:
-        cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
-        config_atual = cur.fetchone()['config']
-
+    
     if request.method == 'POST':
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
+            config_atual = cur.fetchone()['config']
+
         config_atual['nome'] = request.form.get('nome')
         
         for tipo in ['logo', 'fonte_titulo', 'fonte_texto']:
@@ -174,19 +175,52 @@ def configurar():
             cur.execute("UPDATE clientes SET nome = %s, config = %s WHERE id = %s",
                         (config_atual['nome'], json.dumps(config_atual), cliente_id))
         conn.commit()
+        conn.close()
         
         flash("Configurações salvas com sucesso!", "success")
         return redirect(url_for('dashboard'))
 
-    conn.close()
-    return render_template('configurar.html', config=config_atual, cliente_id=cliente_id)
+    else: # request.method == 'GET'
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
+            config = cur.fetchone()['config']
+        conn.close()
+        return render_template('configurar.html', config=config, cliente_id=cliente_id)
 
 @app.route('/adicionar_feed', methods=['POST'])
 def adicionar_feed():
-    # ... (código para adicionar feed, pode manter o da versão anterior)
+    if 'cliente_id' not in session:
+        return jsonify(sucesso=False, erro='Não autenticado'), 401
+    
+    cliente_id = session['cliente_id']
+    url_feed = request.form.get('url_feed')
+    tipo_feed = request.form.get('tipo_feed')
+
+    if not all([url_feed, tipo_feed]):
+        return jsonify(sucesso=False, erro='URL e tipo são obrigatórios'), 400
+
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO feeds (cliente_id, url, tipo) VALUES (%s, %s, %s)",
+                    (cliente_id, url_feed, tipo_feed))
+    conn.commit()
+    conn.close()
+    flash("Feed adicionado com sucesso!", "success")
     return jsonify(sucesso=True)
 
-# ... (outras rotas como remover_feed, webhook, etc.)
+@app.route('/remover_feed/<int:feed_id>', methods=['POST'])
+def remover_feed(feed_id):
+    if 'cliente_id' not in session:
+        return jsonify(sucesso=False, erro='Não autenticado'), 401
+
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM feeds WHERE id = %s AND cliente_id = %s", (feed_id, session['cliente_id']))
+    conn.commit()
+    conn.close()
+    flash("Feed removido.", "info")
+    return jsonify(sucesso=True)
 
 def initialize_app():
     """Função para ser chamada ANTES de iniciar o servidor Gunicorn no Render."""
