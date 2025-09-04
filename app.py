@@ -13,27 +13,28 @@ import cloudinary.uploader
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'sua-chave-secreta-de-desenvolvimento')
+# É MUITO IMPORTANTE que você defina a variável 'SECRET_KEY' nas configurações do Render
+app.secret_key = os.getenv('SECRET_KEY', 'uma-chave-secreta-muito-forte-para-desenvolvimento')
 
-# Configuração do Cloudinary
+# Configuração do Cloudinary a partir das variáveis de ambiente
 cloudinary.config(
     cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
     api_key=os.getenv('CLOUDINARY_API_KEY'),
     api_secret=os.getenv('CLOUDINARY_API_SECRET')
 )
 
-# --- CONEXÃO COM BANCO DE DADOS POSTGRESQL ---
+# --- BANCO DE DADOS POSTGRESQL ---
 
 def get_db_connection():
-    """Conecta ao banco de dados PostgreSQL."""
+    """Conecta ao banco de dados PostgreSQL usando a URL de conexão do Render."""
     conn_string = os.getenv('DATABASE_URL')
     if not conn_string:
-        raise ValueError("ERRO: A variável de ambiente DATABASE_URL não foi definida!")
+        raise ValueError("ERRO CRÍTICO: A variável de ambiente DATABASE_URL não foi definida!")
     conn = psycopg2.connect(conn_string)
     return conn
 
 def init_db():
-    """Cria as tabelas do banco de dados se não existirem."""
+    """Cria as tabelas do banco de dados se elas ainda não existirem."""
     conn = get_db_connection()
     with conn.cursor() as cur:
         cur.execute('''
@@ -44,11 +45,12 @@ def init_db():
                 data_criacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Tabela de feeds atualizada para incluir nome e categoria
         cur.execute('''
             CREATE TABLE IF NOT EXISTS feeds (
                 id SERIAL PRIMARY KEY,
                 cliente_id TEXT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-                nome TEXT,
+                nome TEXT NOT NULL,
                 url TEXT NOT NULL,
                 tipo TEXT NOT NULL,
                 categoria TEXT
@@ -56,7 +58,7 @@ def init_db():
         ''')
     conn.commit()
     conn.close()
-    print("✅ Tabelas do banco de dados verificadas/criadas.")
+    print("✅ Tabelas do banco de dados verificadas/criadas com sucesso.")
 
 # --- ROTAS DA APLICAÇÃO ---
 
@@ -67,6 +69,7 @@ def dashboard():
     
     cliente_id = session['cliente_id']
     conn = get_db_connection()
+    
     try:
         with conn.cursor(cursor_factory=DictCursor) as cur:
             cur.execute("SELECT nome, config FROM clientes WHERE id = %s", (cliente_id,))
@@ -74,28 +77,32 @@ def dashboard():
 
         if not cliente:
             session.clear()
-            flash("Cliente não encontrado. Por favor, faça login novamente.", "warning")
+            flash("Sua sessão era inválida ou o cliente não foi encontrado. Faça login novamente.", "warning")
+            conn.close()
             return redirect(url_for('login'))
 
         with conn.cursor(cursor_factory=DictCursor) as cur:
             cur.execute("SELECT * FROM feeds WHERE cliente_id = %s ORDER BY id", (cliente_id,))
             feeds = cur.fetchall()
         
-        config_cliente = cliente['config'] or {}
-        config_completa = all(k in config_cliente and config_cliente[k] for k in ['logo_url', 'font_url_titulo'])
-
-    except psycopg2.Error as e:
-        flash(f"Erro de banco de dados: {e}", "danger")
-        return redirect(url_for('login'))
-    finally:
-        conn.close()
+        config = cliente['config'] or {}
+        config_completa = config and config.get('logo_url') and config.get('font_url_titulo')
     
-    return render_template('dashboard.html', config=config_cliente, cliente_id=cliente_id, 
+    except psycopg2.Error as e:
+        flash(f"Erro ao conectar com o banco de dados: {e}", "danger")
+        feeds = []
+        config = {}
+        config_completa = False
+    finally:
+        if conn:
+            conn.close()
+
+    return render_template('dashboard.html', config=config, cliente_id=cliente_id, 
                            feeds=feeds, config_completa=config_completa)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # Limpa a sessão ao chegar na página de login para garantir que sempre peça a seleção
+    # CORREÇÃO: Limpa a sessão antiga para sempre mostrar a tela de seleção
     session.clear()
 
     if request.method == 'POST':
@@ -136,7 +143,7 @@ def adicionar_cliente():
         conn.commit()
         conn.close()
 
-        flash(f"Cliente '{nome_cliente}' criado! Agora você pode selecioná-lo e configurar.", "success")
+        flash(f"Cliente '{nome_cliente}' criado! Agora você pode selecioná-lo e configurar os detalhes.", "success")
         return redirect(url_for('login'))
         
     return render_template('adicionar_cliente.html')
@@ -155,8 +162,9 @@ def configurar():
                 cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
                 config_atual = cur.fetchone()['config'] or {}
 
-            config_atual['nome'] = request.form.get('nome_cliente') # Corrigido para nome_cliente
+            config_atual['nome'] = request.form.get('nome_cliente')
             
+            # Upload para Cloudinary
             for tipo in ['logo', 'fonte_titulo', 'fonte_texto']:
                 if tipo in request.files and request.files[tipo].filename != '':
                     arquivo = request.files[tipo]
@@ -171,7 +179,9 @@ def configurar():
                     except Exception as e:
                         flash(f"Erro ao enviar {tipo} para o Cloudinary: {str(e)}", "danger")
 
-            campos_form = ['cor_fundo', 'cor_texto_titulo', 'cor_texto_noticia', 'posicao_logo_x', 'posicao_logo_y', 'tamanho_logo']
+            # Atualiza outros campos
+            campos_form = ['cor_fundo', 'cor_texto_titulo', 'cor_texto_noticia', 
+                           'posicao_logo_x', 'posicao_logo_y', 'tamanho_logo']
             for campo in campos_form:
                 if request.form.get(campo):
                     config_atual[campo] = request.form.get(campo)
@@ -181,15 +191,14 @@ def configurar():
                             (config_atual['nome'], json.dumps(config_atual), cliente_id))
             conn.commit()
             flash("Configurações salvas com sucesso!", "success")
-            return redirect(url_for('dashboard'))
 
         except Exception as e:
-            flash(f"Ocorreu um erro ao salvar: {str(e)}", "danger")
+            flash(f"Ocorreu um erro geral ao salvar: {str(e)}", "danger")
         finally:
             if conn:
                 conn.close()
         
-        return redirect(url_for('configurar'))
+        return redirect(url_for('dashboard'))
 
     else: # GET
         conn = get_db_connection()
@@ -205,34 +214,41 @@ def adicionar_feed():
         return jsonify(sucesso=False, erro='Não autenticado'), 401
     
     cliente_id = session['cliente_id']
-    dados = request.form
     
-    if not all(k in dados for k in ['nome', 'url', 'tipo']):
-        return jsonify(sucesso=False, erro='Dados incompletos'), 400
+    # CORREÇÃO: Usando os nomes corretos do formulário
+    nome_feed = request.form.get('nome')
+    url_feed = request.form.get('url')
+    tipo_feed = request.form.get('tipo')
+    categoria_feed = request.form.get('categoria')
+
+    if not all([nome_feed, url_feed, tipo_feed]):
+        return jsonify(sucesso=False, erro='Nome, URL e tipo são obrigatórios'), 400
 
     conn = get_db_connection()
     with conn.cursor() as cur:
         cur.execute("INSERT INTO feeds (cliente_id, nome, url, tipo, categoria) VALUES (%s, %s, %s, %s, %s)",
-                    (cliente_id, dados['nome'], dados['url'], dados['tipo'], dados.get('categoria')))
+                    (cliente_id, nome_feed, url_feed, tipo_feed, categoria_feed))
     conn.commit()
     conn.close()
     
-    # CORREÇÃO: Retornar JSON em vez de redirecionar
-    return jsonify(sucesso=True, mensagem='Feed adicionado com sucesso!')
+    # Retornar uma resposta JSON é crucial para o JavaScript funcionar
+    return jsonify(sucesso=True, mensagem="Feed adicionado com sucesso!")
 
-@app.route('/remover-feed/<int:feed_id>', methods=['POST']) # Alterado para POST para consistência
+
+@app.route('/remover-feed/<int:feed_id>', methods=['POST'])
 def remover_feed(feed_id):
     if 'cliente_id' not in session:
         return jsonify(sucesso=False, erro='Não autenticado'), 401
 
     conn = get_db_connection()
     with conn.cursor() as cur:
+        # Garante que só o cliente dono do feed pode removê-lo
         cur.execute("DELETE FROM feeds WHERE id = %s AND cliente_id = %s", (feed_id, session['cliente_id']))
     conn.commit()
     conn.close()
+    
+    return jsonify(sucesso=True, mensagem="Feed removido com sucesso!")
 
-    # CORREÇÃO: Retornar JSON
-    return jsonify(sucesso=True, mensagem='Feed removido com sucesso!')
 
 def initialize_app():
     """Função para ser chamada ANTES de iniciar o servidor Gunicorn no Render."""
