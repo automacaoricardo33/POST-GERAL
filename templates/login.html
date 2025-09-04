@@ -1,13 +1,13 @@
 {% extends 'layout.html' %}
 {% block title %}Login - RS Sistema de Automação{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
+<div class="row justify-content-center mt-5">
     <div class="col-md-6">
         <div class="card shadow-sm">
             <div class="card-header text-center">
                 <h3>Acessar Painel de Cliente</h3>
             </div>
-            <div class="card-body">
+            <div class="card-body p-4">
                 {% with messages = get_flashed_messages(with_categories=true) %}
                     {% if messages %}
                         {% for category, message in messages %}
@@ -34,8 +34,9 @@
                     </form>
                 {% else %}
                     <div class="text-center">
-                        <h4>Bem-vindo!</h4>
-                        <p>Nenhum cliente foi encontrado. Para começar, crie seu primeiro cliente.</p>
+                        <h4 class="mb-3">Bem-vindo!</h4>
+                        <p>Nenhum cliente foi encontrado no sistema.</p>
+                        <p>Para começar, crie seu primeiro cliente.</p>
                         <a href="{{ url_for('adicionar_cliente') }}" class="btn btn-success btn-lg mt-2">
                             <i class="bi bi-plus-circle"></i> Criar Primeiro Cliente
                         </a>
