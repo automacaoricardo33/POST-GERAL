@@ -1,837 +1,368 @@
-# ==============================================================================
-# BLOCO 1: IMPORTAÇÕES
-# ==============================================================================
 import os
-import io
 import json
-import requests
-import textwrap
-from flask import Flask, request, jsonify, render_template, session, redirect, send_from_directory
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFont, ImageOps
-from base64 import b64encode
 import uuid
-from datetime import datetime
 import sqlite3
-from werkzeug.security import generate_password_hash, check_password_hash
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory
+from werkzeug.utils import secure_filename
+from PIL import Image, ImageDraw, ImageFont
+import requests
+from io import BytesIO
+import feedparser
+import textwrap
 
-# ==============================================================================
-# BLOCO 2: CONFIGURAÇÃO INICIAL
-# ==============================================================================
-load_dotenv()
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'chave-secreta-padrao-alterar-em-producao')
+app.secret_key = 'sua_chave_secreta_super_segura' 
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB
 
-# Configuração do Cloudinary
-cloudinary.config(
-    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
-    api_key=os.getenv('CLOUDINARY_API_KEY'),
-    api_secret=os.getenv('CLOUDINARY_API_SECRET')
-)
+# --- Funções de Utilidade e Configuração ---
 
-# Configurar pasta de uploads
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'ttf', 'otf'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# Configuração do banco de dados
-def init_db():
+def inicializar_banco_de_dados():
+    """Cria as tabelas do banco de dados se elas não existirem."""
     conn = sqlite3.connect('clientes.db')
     c = conn.cursor()
-    
-    # Tabela de clientes
-    c.execute('''CREATE TABLE IF NOT EXISTS clientes
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  nome TEXT UNIQUE,
-                  config TEXT,
-                  data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
-    # Tabela de usuários
-    c.execute('''CREATE TABLE IF NOT EXISTS usuarios
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  username TEXT UNIQUE,
-                  password_hash TEXT,
-                  cliente_id INTEGER,
-                  FOREIGN KEY (cliente_id) REFERENCES clientes (id))''')
-    
-    # Tabela de feeds RSS/JSON
-    c.execute('''CREATE TABLE IF NOT EXISTS feeds
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  cliente_id TEXT,
-                  nome TEXT,
-                  url TEXT,
-                  tipo TEXT,
-                  categoria TEXT,
-                  ativo BOOLEAN DEFAULT TRUE,
-                  data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
+    # Tabela de Clientes
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS clientes (
+            id TEXT PRIMARY KEY,
+            nome TEXT NOT NULL,
+            config TEXT
+        )
+    ''')
+    # Tabela de Feeds com chave estrangeira para o cliente
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS feeds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            FOREIGN KEY (cliente_id) REFERENCES clientes (id)
+        )
+    ''')
     conn.commit()
     conn.close()
 
-init_db()
-
-print("🚀 INICIANDO SISTEMA DE AUTOMAÇÃO PERSONALIZÁVEL COM CLOUDINARY")
-
-# Configurações padrão
-IMG_WIDTH, IMG_HEIGHT = 1080, 1080
-CONFIG_FILE = 'clientes_config.json'
-
-# Carregar configurações dos clientes
 def carregar_configuracoes():
-    try:
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if content:
-                    return json.loads(content)
+    """Carrega as configurações do arquivo JSON."""
+    if not os.path.exists('clientes_config.json'):
         return {}
-    except json.JSONDecodeError:
-        print("❌ Erro ao carregar configurações. Iniciando com configurações vazias.")
-        return {}
+    with open('clientes_config.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
 
 def salvar_configuracoes(config):
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
+    """Salva as configurações no arquivo JSON."""
+    with open('clientes_config.json', 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4)
 
-# Configurações iniciais
 configuracoes = carregar_configuracoes()
 
-# ==============================================================================
-# BLOCO 3: FUNÇÕES AUXILIARES
-# ==============================================================================
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+def verificar_configuracao_completa(cliente_id):
+    """Verifica se a configuração essencial do cliente foi preenchida."""
+    config = configuracoes.get(cliente_id, {})
+    essenciais = ['nome', 'logo_path', 'font_path_titulo', 'font_path_texto']
+    return all(key in config and config[key] for key in essenciais)
 
-def upload_arquivo(arquivo, pasta, cliente_id=None):
-    if arquivo and allowed_file(arquivo.filename):
-        if cliente_id:
-            filename = f"{cliente_id}_{uuid.uuid4().hex[:8]}_{arquivo.filename}"
-        else:
-            filename = f"{uuid.uuid4().hex}_{arquivo.filename}"
-            
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], pasta, filename)
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        arquivo.save(filepath)
-        return filename
-    return None
+# --- Rotas da Aplicação ---
 
-def baixar_imagem(url, timeout=15):
-    """Baixa uma imagem a partir de uma URL"""
-    try:
-        response = requests.get(url, stream=True, timeout=timeout)
-        response.raise_for_status()
-        return Image.open(io.BytesIO(response.content)).convert("RGBA")
-    except Exception as e:
-        print(f"❌ Erro ao baixar imagem: {e}")
-        return None
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Lida com o login do cliente ou cria um novo se nenhum ID for fornecido."""
+    if request.method == 'POST':
+        cliente_id = request.form.get('cliente_id')
 
-def upload_para_cloudinary(imagem_bytes, public_id, pasta="automacao_social"):
-    """Faz upload de uma imagem para o Cloudinary"""
-    try:
-        with io.BytesIO(imagem_bytes) as buffer:
-            buffer.name = f"{public_id}.jpg"
-            buffer.seek(0)
-            
-            resultado = cloudinary.uploader.upload(
-                buffer,
-                public_id=public_id,
-                folder=pasta,
-                overwrite=True,
-                resource_type="image"
-            )
-            
-            print(f"✅ Imagem {public_id} enviada para o Cloudinary")
-            return resultado['secure_url']
-    except Exception as e:
-        print(f"❌ Erro ao fazer upload para o Cloudinary: {e}")
-        return None
-
-def processar_texto(texto, largura_maxima, fonte):
-    """Quebra o texto em linhas com base na largura máxima"""
-    draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-    palavras = texto.split()
-    linhas = []
-    linha_atual = []
-    
-    for palavra in palavras:
-        linha_atual.append(palavra)
-        teste_linha = ' '.join(linha_atual)
-        largura, _ = draw.textsize(teste_linha, font=fonte)
-        
-        if largura > largura_maxima:
-            linha_atual.pop()
-            linhas.append(' '.join(linha_atual))
-            linha_atual = [palavra]
-    
-    if linha_atual:
-        linhas.append(' '.join(linha_atual))
-    
-    return linhas
-
-def hex_para_rgb(cor_hex):
-    """Converte cor hexadecimal para RGB"""
-    cor_hex = cor_hex.lstrip('#')
-    return tuple(int(cor_hex[i:i+2], 16) for i in (0, 2, 4))
-
-def carregar_fonte(caminho_fonte, tamanho, cliente_id=None):
-    """Carrega uma fonte do sistema ou da pasta de uploads"""
-    try:
-        # Primeiro tenta carregar da pasta de uploads do cliente específico
-        if cliente_id:
-            cliente_font_path = os.path.join(UPLOAD_FOLDER, 'fonts', f"{cliente_id}_{caminho_fonte}")
-            if os.path.exists(cliente_font_path):
-                return ImageFont.truetype(cliente_font_path, tamanho)
-        
-        # Tenta carregar da pasta geral de fonts
-        fontes_path = os.path.join(UPLOAD_FOLDER, 'fonts', caminho_fonte)
-        if os.path.exists(fontes_path):
-            return ImageFont.truetype(fontes_path, tamanho)
-        
-        # Se não encontrar, tenta carregar do sistema
-        return ImageFont.truetype(caminho_fonte, tamanho)
-    except:
-        # Fallback para fonte padrão
-        return ImageFont.load_default()
-
-def criar_imagem_post(config, url_imagem, titulo_post, categoria=None, cliente_id=None):
-    """Cria imagem personalizada com base nas configurações do cliente"""
-    print("🎨 Iniciando criação da imagem personalizada...")
-    
-    try:
-        # Baixar imagens
-        imagem_noticia = baixar_imagem(url_imagem)
-        
-        # Carregar logo - prioriza logo específico do cliente
-        logo_filename = config.get('logo_filename')
-        logo = None
-        
-        if logo_filename:
-            # Primeiro tenta carregar da pasta do cliente específico
-            if cliente_id:
-                cliente_logo_path = os.path.join(UPLOAD_FOLDER, 'logos', f"{cliente_id}_{logo_filename}")
-                if os.path.exists(cliente_logo_path):
-                    logo = Image.open(cliente_logo_path).convert("RGBA")
-            
-            # Se não encontrou logo específico do cliente, tenta o geral
-            if logo is None:
-                geral_logo_path = os.path.join(UPLOAD_FOLDER, 'logos', logo_filename)
-                if os.path.exists(geral_logo_path):
-                    logo = Image.open(geral_logo_path).convert("RGBA")
-        
-        # Fallback para logo padrão se não houver
-        if logo is None:
-            logo = Image.new('RGBA', (100, 100), (255, 0, 0, 255))
-        
-        if not imagem_noticia:
-            return None
-
-        # Configurações de design do cliente
-        cor_fundo = config.get('cor_fundo', '#FFFFFF')
-        cor_texto = config.get('cor_texto', '#000000')
-        cor_destaque = config.get('cor_destaque', '#d90429')
-        cor_borda = config.get('cor_borda', '#000000')
-        cor_categoria = config.get('cor_categoria', '#ff0000')
-        espessura_borda = config.get('espessura_borda', 5)
-        arredondamento_borda = config.get('arredondamento_borda', 20)
-        
-        # Carregar fontes - prioriza fontes específicas do cliente
-        fonte_titulo_nome = config.get('fonte_titulo', 'Arial')
-        fonte_rodape_nome = config.get('fonte_rodape', 'Arial')
-        tamanho_fonte_titulo = config.get('tamanho_fonte_titulo', 50)
-        tamanho_fonte_rodape = config.get('tamanho_fonte_rodape', 30)
-        
-        fonte_titulo = carregar_fonte(fonte_titulo_nome, tamanho_fonte_titulo, cliente_id)
-        fonte_rodape = carregar_fonte(fonte_rodape_nome, tamanho_fonte_rodape, cliente_id)
-
-        # Criar imagem base
-        imagem_final = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), hex_para_rgb(cor_fundo) + (255,))
-        draw = ImageDraw.Draw(imagem_final)
-
-        # Adicionar faixa de categoria se fornecida
-        pos_img_y = 50
-        if categoria:
-            altura_faixa = 40
-            draw.rectangle([(0, 0), (IMG_WIDTH, altura_faixa)], fill=hex_para_rgb(cor_categoria))
-            fonte_categoria = carregar_fonte(fonte_titulo_nome, 25, cliente_id)
-            texto_categoria = categoria.upper()
-            draw.text((IMG_WIDTH / 2, altura_faixa / 2), texto_categoria, font=fonte_categoria, 
-                     fill=hex_para_rgb(cor_texto), anchor="mm")
-            pos_img_y += altura_faixa + 10
-
-        # Redimensionar e posicionar imagem da notícia
-        img_w, img_h = 980, 551
-        imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
-        pos_img_x = (IMG_WIDTH - img_w) // 2
-        imagem_final.paste(imagem_noticia_resized, (pos_img_x, pos_img_y))
-
-        # Adicionar borda se configurado
-        if espessura_borda > 0:
-            borda = ImageOps.expand(imagem_noticia_resized, border=espessura_borda, fill=hex_para_rgb(cor_borda))
-            imagem_final.paste(borda, (pos_img_x - espessura_borda, pos_img_y - espessura_borda))
-
-        # Área de texto personalizável
-        box_texto_coords = [(50, 620), (IMG_WIDTH - 50, IMG_HEIGHT - 50)]
-        draw.rounded_rectangle(box_texto_coords, radius=arredondamento_borda, fill=hex_para_rgb(cor_destaque))
-
-        # Logo (elevado)
-        logo_size = 220
-        logo.thumbnail((logo_size, logo_size))
-        pos_logo_x = (IMG_WIDTH - logo_size) // 2
-        pos_logo_y = 620 - (logo_size // 2) - 20  # Eleva o logo
-        imagem_final.paste(logo, (pos_logo_x, pos_logo_y), logo)
-
-        # Título com quebra de linha personalizada
-        linhas_texto = processar_texto(titulo_post.upper(), 900, fonte_titulo)
-        y_texto = 800
-        for linha in linhas_texto:
-            draw.text((IMG_WIDTH / 2, y_texto), linha, font=fonte_titulo, fill=hex_para_rgb(cor_texto), anchor="mm", align="center")
-            y_texto += fonte_titulo.getsize(linha)[1] + 10
-
-        # Rodape personalizado
-        rodape = config.get('texto_rodape', '@SUAEMPRESA')
-        draw.text((IMG_WIDTH / 2, 980), rodape, font=fonte_rodape, fill=hex_para_rgb(cor_texto), anchor="ms", align="center")
-
-        # Salvar imagem
-        buffer_saida = io.BytesIO()
-        imagem_final.convert('RGB').save(buffer_saida, format='JPEG', quality=95)
-        print("✅ Imagem personalizada criada com sucesso!")
-        return buffer_saida.getvalue()
-        
-    except Exception as e:
-        print(f"❌ Erro na criação da imagem: {e}")
-        return None
-
-def publicar_redes_sociais(config, url_imagem, titulo, resumo, hashtags):
-    """Publica nas redes sociais com base nas configurações"""
-    resultados = {}
-    
-    # WordPress
-    if config.get('wp_integracao', False):
-        wp_url = config.get('wp_url')
-        wp_user = config.get('wp_user')
-        wp_password = config.get('wp_password')
-        
-        if all([wp_url, wp_user, wp_password]):
-            try:
-                credentials = f"{wp_user}:{wp_password}"
-                token_wp = b64encode(credentials.encode())
-                headers_wp = {'Authorization': f'Basic {token_wp.decode("utf-8")}'}
-                
-                # Fazer upload para WordPress
-                nome_arquivo = f"post_social_{int(datetime.now().timestamp())}.jpg"
-                url_wp_media = f"{wp_url}/wp-json/wp/v2/media"
-                headers_upload = headers_wp.copy()
-                headers_upload['Content-Disposition'] = f'attachment; filename={nome_arquivo}'
-                headers_upload['Content-Type'] = 'image/jpeg'
-                
-                # Baixar imagem do Cloudinary para enviar ao WordPress
-                response_img = requests.get(url_imagem)
-                if response_img.status_code == 200:
-                    response = requests.post(url_wp_media, headers=headers_upload, data=response_img.content, timeout=30)
-                    response.raise_for_status()
-                    link_imagem_publica = response.json()['source_url']
-                    resultados['wordpress'] = {'sucesso': True, 'url': link_imagem_publica}
-                else:
-                    resultados['wordpress'] = {'sucesso': False, 'erro': 'Falha ao baixar imagem do Cloudinary'}
-            except Exception as e:
-                resultados['wordpress'] = {'sucesso': False, 'erro': str(e)}
-    
-    # Instagram
-    if config.get('instagram_integracao', False):
-        meta_token = config.get('meta_token')
-        instagram_id = config.get('instagram_id')
-        
-        if all([meta_token, instagram_id]):
-            try:
-                # Criar container de mídia
-                url_container = f"https://graph.facebook.com/v19.0/{instagram_id}/media"
-                legenda = f"{titulo}\n\n{resumo}\n\n{hashtags}"
-                params_container = {'image_url': url_imagem, 'caption': legenda, 'access_token': meta_token}
-                r_container = requests.post(url_container, params=params_container, timeout=20)
-                r_container.raise_for_status()
-                id_criacao = r_container.json()['id']
-                
-                # Publicar
-                url_publicacao = f"https://graph.facebook.com/v19.0/{instagram_id}/media_publish"
-                params_publicacao = {'creation_id': id_criacao, 'access_token': meta_token}
-                r_publish = requests.post(url_publicacao, params=params_publicacao, timeout=20)
-                r_publish.raise_for_status()
-                resultados['instagram'] = {'sucesso': True}
-            except Exception as e:
-                resultados['instagram'] = {'sucesso': False, 'erro': str(e)}
-    
-    # Facebook
-    if config.get('facebook_integracao', False):
-        meta_token = config.get('meta_token')
-        facebook_page_id = config.get('facebook_page_id')
-        
-        if all([meta_token, facebook_page_id]):
-            try:
-                url_post_foto = f"https://graph.facebook.com/v19.0/{facebook_page_id}/photos"
-                legenda = f"{titulo}\n\n{resumo}\n\n{hashtags}"
-                params = {'url': url_imagem, 'message': legenda, 'access_token': meta_token}
-                r = requests.post(url_post_foto, params=params, timeout=20)
-                r.raise_for_status()
-                resultados['facebook'] = {'sucesso': True}
-            except Exception as e:
-                resultados['facebook'] = {'sucesso': False, 'erro': str(e)}
-    
-    return resultados
-
-def processar_feed_rss(url_feed, limite=5):
-    """Processa um feed RSS usando BeautifulSoup em vez de feedparser"""
-    try:
-        response = requests.get(url_feed, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, 'xml')
-        noticias = []
-        
-        for entrada in soup.find_all('item')[:limite]:
-            # Extrair informações básicas
-            titulo = entrada.find('title')
-            resumo = entrada.find('description')
-            link = entrada.find('link')
-            data = entrada.find('pubDate')
-            
-            # Tentar encontrar uma imagem
-            imagem = None
-            
-            # Verificar tag media:content
-            media_content = entrada.find('media:content')
-            if media_content and media_content.get('url'):
-                imagem = media_content.get('url')
-            
-            # Verificar tag enclosure
-            if not imagem:
-                enclosure = entrada.find('enclosure')
-                if enclosure and 'image' in enclosure.get('type', ''):
-                    imagem = enclosure.get('url')
-            
-            # Procurar imagem no conteúdo
-            if not imagem:
-                content = entrada.find('content:encoded')
-                if not content:
-                    content = resumo
-                if content:
-                    content_soup = BeautifulSoup(content.text, 'html.parser')
-                    img = content_soup.find('img')
-                    if img:
-                        imagem = img.get('src')
-            
-            noticia = {
-                'titulo': titulo.text if titulo else 'Sem título',
-                'resumo': resumo.text if resumo else '',
-                'link': link.text if link else '',
-                'data': data.text if data else '',
-                'imagem': imagem
+        # Se não foi fornecido um cliente_id, cria um novo
+        if not cliente_id:
+            cliente_id = f"cliente_{uuid.uuid4().hex[:8]}"
+            configuracoes[cliente_id] = {
+                'nome': 'Novo Cliente',
+                'logo_path': '',
+                'font_path_titulo': '',
+                'font_path_texto': '',
+                'cor_fundo': '#FFFFFF',
+                'cor_texto_titulo': '#000000',
+                'cor_texto_noticia': '#333333',
+                'posicao_logo_x': 10,
+                'posicao_logo_y': 10,
+                'tamanho_logo': 100
             }
-            noticias.append(noticia)
-        
-        return noticias
-    except Exception as e:
-        print(f"❌ Erro ao processar feed RSS: {e}")
-        return []
+            
+            # **INÍCIO DA CORREÇÃO: Salvar novo cliente no banco de dados**
+            try:
+                conn = sqlite3.connect('clientes.db')
+                c = conn.cursor()
+                c.execute("INSERT INTO clientes (id, nome, config) VALUES (?, ?, ?)", 
+                          (cliente_id, 'Novo Cliente', json.dumps(configuracoes[cliente_id])))
+                conn.commit()
+                conn.close()
+                print(f"✅ Novo cliente inserido no banco de dados: {cliente_id}")
+            except sqlite3.Error as e:
+                print(f"❌ Erro ao inserir novo cliente no banco de dados: {e}")
+                # Pode-se retornar uma mensagem de erro para o usuário aqui
+                return render_template('login.html', erro='Falha ao criar cliente no banco de dados.')
+            # **FIM DA CORREÇÃO**
+            
+            salvar_configuracoes(configuracoes)
+            print(f"✅ Novo cliente criado: {cliente_id}")
 
-def processar_json_noticias(url_json, limite=5):
-    """Processa um JSON de notícias e retorna as últimas"""
-    try:
-        response = requests.get(url_json, timeout=10)
-        response.raise_for_status()
-        dados = response.json()
-        
-        noticias = []
-        for item in dados[:limite]:
-            noticia = {
-                'titulo': item.get('title', ''),
-                'resumo': item.get('summary', ''),
-                'link': item.get('link', ''),
-                'data': item.get('date', ''),
-                'imagem': item.get('image', '')
-            }
-            noticias.append(noticia)
-        
-        return noticias
-    except Exception as e:
-        print(f"❌ Erro ao processar JSON: {e}")
-        return []
+        # Verifica se o cliente existe
+        elif cliente_id not in configuracoes:
+            return render_template('login.html', erro='Cliente não encontrado.')
 
-# ==============================================================================
-# BLOCO 4: ROTAS DA INTERFACE WEB
-# ==============================================================================
+        session['cliente_id'] = cliente_id
+        return redirect(url_for('dashboard'))
+
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """Faz o logout do cliente."""
+    session.pop('cliente_id', None)
+    return redirect(url_for('login'))
+
 @app.route('/')
-def index():
+def dashboard():
+    """Exibe o painel principal do cliente."""
     if 'cliente_id' not in session:
-        return render_template('login.html')
+        return redirect(url_for('login'))
     
     cliente_id = session['cliente_id']
-    config = configuracoes.get(cliente_id, {})
-    
-    # Conectar ao banco de dados para obter feeds
+    config_cliente = configuracoes.get(cliente_id, {})
+    config_completa = verificar_configuracao_completa(cliente_id)
+
+    # Buscar feeds do banco de dados
     conn = sqlite3.connect('clientes.db')
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM feeds WHERE cliente_id = ?", (cliente_id,))
     feeds = c.fetchall()
     conn.close()
-    
-    # Verificar se a configuração está completa
-    config_completa = all([
-        config.get('nome'),
-        config.get('logo_filename'),
-        config.get('fonte_titulo'),
-        config.get('fonte_rodape')
-    ])
-    
-    return render_template('dashboard.html', config=config, cliente_id=cliente_id, 
-                          feeds=feeds, config_completa=config_completa)
 
-@app.route('/login', methods=['POST'])
-def login():
-    username = request.form.get('username')
-    password = request.form.get('password')
-    cliente_id = request.form.get('cliente_id', '').strip()
+    # **CORREÇÃO: Listar todos os clientes a partir do banco de dados**
+    conn = sqlite3.connect('clientes.db')
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT id, nome FROM clientes")
+    todos_clientes = c.fetchall()
+    conn.close()
     
-    # Verificar credenciais
-    if username != 'admin' or password != 'admin':
-        return jsonify({'sucesso': False, 'erro': 'Credenciais inválidas'})
-    
-    # Se não foi fornecido um cliente_id, criar um novo
-    if not cliente_id:
-        cliente_id = f"cliente_{uuid.uuid4().hex[:8]}"
-        configuracoes[cliente_id] = {
-            'nome': 'Novo Cliente',
-            'wp_integracao': False,
-            'instagram_integracao': False,
-            'facebook_integracao': False,
-            'cor_fundo': '#FFFFFF',
-            'cor_texto': '#000000',
-            'cor_destaque': '#d90429',
-            'cor_borda': '#000000',
-            'cor_categoria': '#ff0000',
-            'espessura_borda': 5,
-            'arredondamento_borda': 20,
-            'texto_rodape': '@SUAEMPRESA',
-            'hashtags_padrao': '#noticias #brasil',
-            'tamanho_fonte_titulo': 50,
-            'tamanho_fonte_rodape': 30,
-        }
-        salvar_configuracoes(configuracoes)
-        print(f"✅ Novo cliente criado: {cliente_id}")
-    
-    # Verificar se o cliente_id existe nas configurações
-    if cliente_id not in configuracoes:
-        return jsonify({'sucesso': False, 'erro': 'Cliente ID não encontrado'})
-    
-    # Login bem-sucedido
-    session['cliente_id'] = cliente_id
-    return jsonify({
-        'sucesso': True, 
-        'cliente_id': cliente_id,
-        'mensagem': 'Login realizado com sucesso'
-    })
-
-@app.route('/logout')
-def logout():
-    session.pop('cliente_id', None)
-    return redirect('/')
+    return render_template('dashboard.html', 
+                           cliente_id=cliente_id, 
+                           config=config_cliente, 
+                           config_completa=config_completa,
+                           feeds=feeds,
+                           clientes=todos_clientes)
 
 @app.route('/configurar', methods=['GET', 'POST'])
 def configurar():
+    """Página de configuração do cliente."""
     if 'cliente_id' not in session:
-        return redirect('/')
+        return redirect(url_for('login'))
     
     cliente_id = session['cliente_id']
     
     if request.method == 'POST':
-        # Processar uploads de arquivos
-        logo_arquivo = request.files.get('logo_arquivo')
-        fonte_titulo_arquivo = request.files.get('fonte_titulo_arquivo')
-        fonte_rodape_arquivo = request.files.get('fonte_rodape_arquivo')
+        # Atualiza o nome do cliente
+        configuracoes[cliente_id]['nome'] = request.form['nome']
         
-        logo_filename = None
-        fonte_titulo_filename = None
-        fonte_rodape_filename = None
+        # Salva o logo
+        if 'logo' in request.files and request.files['logo'].filename != '':
+            logo = request.files['logo']
+            filename = secure_filename(f"{cliente_id}_{logo.filename}")
+            logo_path = os.path.join(app.config['UPLOAD_FOLDER'], 'logos', filename)
+            os.makedirs(os.path.dirname(logo_path), exist_ok=True)
+            logo.save(logo_path)
+            configuracoes[cliente_id]['logo_path'] = logo_path
         
-        if logo_arquivo and allowed_file(logo_arquivo.filename):
-            logo_filename = upload_arquivo(logo_arquivo, 'logos', cliente_id)
+        # Salva as fontes
+        for tipo_fonte in ['titulo', 'texto']:
+            campo_arquivo = f'fonte_{tipo_fonte}'
+            if campo_arquivo in request.files and request.files[campo_arquivo].filename != '':
+                fonte = request.files[campo_arquivo]
+                filename = secure_filename(f"{cliente_id}_{fonte.filename}")
+                fonte_path = os.path.join(app.config['UPLOAD_FOLDER'], 'fonts', filename)
+                os.makedirs(os.path.dirname(fonte_path), exist_ok=True)
+                fonte.save(fonte_path)
+                configuracoes[cliente_id][f'font_path_{tipo_fonte}'] = fonte_path
+
+        # Salva outras configurações
+        configuracoes[cliente_id]['cor_fundo'] = request.form['cor_fundo']
+        configuracoes[cliente_id]['cor_texto_titulo'] = request.form['cor_texto_titulo']
+        configuracoes[cliente_id]['cor_texto_noticia'] = request.form['cor_texto_noticia']
+        configuracoes[cliente_id]['posicao_logo_x'] = int(request.form['posicao_logo_x'])
+        configuracoes[cliente_id]['posicao_logo_y'] = int(request.form['posicao_logo_y'])
+        configuracoes[cliente_id]['tamanho_logo'] = int(request.form['tamanho_logo'])
         
-        if fonte_titulo_arquivo and allowed_file(fonte_titulo_arquivo.filename):
-            fonte_titulo_filename = upload_arquivo(fonte_titulo_arquivo, 'fonts', cliente_id)
-        
-        if fonte_rodape_arquivo and allowed_file(fonte_rodape_arquivo.filename):
-            fonte_rodape_filename = upload_arquivo(fonte_rodape_arquivo, 'fonts', cliente_id)
-        
-        # Salvar configurações
-        nova_config = {
-            'nome': request.form.get('nome_cliente'),
-            'wp_url': request.form.get('wp_url'),
-            'wp_user': request.form.get('wp_user'),
-            'wp_password': request.form.get('wp_password'),
-            'wp_integracao': request.form.get('wp_integracao') == 'on',
-            'meta_token': request.form.get('meta_token'),
-            'instagram_id': request.form.get('instagram_id'),
-            'facebook_page_id': request.form.get('facebook_page_id'),
-            'instagram_integracao': request.form.get('instagram_integracao') == 'on',
-            'facebook_integracao': request.form.get('facebook_integracao') == 'on',
-            'cor_fundo': request.form.get('cor_fundo'),
-            'cor_texto': request.form.get('cor_texto'),
-            'cor_destaque': request.form.get('cor_destaque'),
-            'cor_borda': request.form.get('cor_borda'),
-            'cor_categoria': request.form.get('cor_categoria'),
-            'espessura_borda': int(request.form.get('espessura_borda', 5)),
-            'arredondamento_borda': int(request.form.get('arredondamento_borda', 20)),
-            'texto_rodape': request.form.get('texto_rodape'),
-            'hashtags_padrao': request.form.get('hashtags_padrao'),
-            'tamanho_fonte_titulo': int(request.form.get('tamanho_fonte_titulo', 50)),
-            'tamanho_fonte_rodape': int(request.form.get('tamanho_fonte_rodape', 30)),
-        }
-        
-        # Adicionar nomes de arquivos se foram enviados
-        if logo_filename:
-            nova_config['logo_filename'] = logo_filename
-        
-        if fonte_titulo_filename:
-            nova_config['fonte_titulo'] = fonte_titulo_filename
-        else:
-            nova_config['fonte_titulo'] = request.form.get('fonte_titulo')
-        
-        if fonte_rodape_filename:
-            nova_config['fonte_rodape'] = fonte_rodape_filename
-        else:
-            nova_config['fonte_rodape'] = request.form.get('fonte_rodape')
-        
-        configuracoes[cliente_id] = nova_config
         salvar_configuracoes(configuracoes)
-        
-        return jsonify({'sucesso': True})
-    
-    config = configuracoes.get(cliente_id, {})
-    
-    # Listar fontes disponíveis (do cliente específico)
-    fontes_disponiveis = []
-    fontes_path = os.path.join(UPLOAD_FOLDER, 'fonts')
-    if os.path.exists(fontes_path):
-        # Filtrar fontes do cliente específico
-        fontes_cliente = [f for f in os.listdir(fontes_path) if f.startswith(f"{cliente_id}_")]
-        fontes_disponiveis.extend([f.replace(f"{cliente_id}_", "") for f in fontes_cliente])
-        
-        # Adicionar fontes gerais (sem prefixo de cliente)
-        fontes_gerais = [f for f in os.listdir(fontes_path) if not any(f.startswith(f"cliente_") for f in [f])]
-        fontes_disponiveis.extend(fontes_gerais)
-    
-    return render_template('configurar.html', config=config, fontes_disponiveis=fontes_disponiveis, cliente_id=cliente_id)
 
-@app.route('/uploads/<path:filename>')
-def download_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+        # **Atualizar o banco de dados também**
+        try:
+            conn = sqlite3.connect('clientes.db')
+            c = conn.cursor()
+            c.execute("UPDATE clientes SET nome = ?, config = ? WHERE id = ?",
+                      (configuracoes[cliente_id]['nome'], json.dumps(configuracoes[cliente_id]), cliente_id))
+            conn.commit()
+            conn.close()
+        except sqlite3.Error as e:
+            print(f"Erro ao atualizar config no DB: {e}")
+            
+        return redirect(url_for('dashboard'))
 
-@app.route('/adicionar-feed', methods=['POST'])
+    config_cliente = configuracoes.get(cliente_id, {})
+    return render_template('configurar.html', config=config_cliente, cliente_id=cliente_id)
+
+
+@app.route('/adicionar_feed', methods=['POST'])
 def adicionar_feed():
     if 'cliente_id' not in session:
-        return jsonify({'sucesso': False, 'erro': 'Não autorizado'}), 403
-    
-    cliente_id = session['cliente_id']
-    nome = request.form.get('nome')
-    url = request.form.get('url')
-    tipo = request.form.get('tipo')
-    categoria = request.form.get('categoria')
-    
-    if not all([nome, url, tipo]):
-        return jsonify({'sucesso': False, 'erro': 'Dados incompletos'}), 400
-    
-    # Conectar ao banco de dados
-    conn = sqlite3.connect('clientes.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO feeds (cliente_id, nome, url, tipo, categoria) VALUES (?, ?, ?, ?, ?)",
-              (cliente_id, nome, url, tipo, categoria))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'sucesso': True})
+        return jsonify({'sucesso': False, 'erro': 'Não autenticado'}), 401
 
-@app.route('/remover-feed/<int:feed_id>', methods=['DELETE'])
+    cliente_id = session['cliente_id']
+    url_feed = request.form.get('url_feed')
+    tipo_feed = request.form.get('tipo_feed')
+
+    if not url_feed or not tipo_feed:
+        return jsonify({'sucesso': False, 'erro': 'URL e tipo do feed são obrigatórios'}), 400
+
+    try:
+        conn = sqlite3.connect('clientes.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO feeds (cliente_id, url, tipo) VALUES (?, ?, ?)",
+                  (cliente_id, url_feed, tipo_feed))
+        conn.commit()
+        conn.close()
+        return jsonify({'sucesso': True})
+    except sqlite3.Error as e:
+        return jsonify({'sucesso': False, 'erro': f'Erro no banco de dados: {e}'}), 500
+
+
+@app.route('/remover_feed/<int:feed_id>', methods=['POST'])
 def remover_feed(feed_id):
     if 'cliente_id' not in session:
-        return jsonify({'sucesso': False, 'erro': 'Não autorizado'}), 403
+        return jsonify({'sucesso': False, 'erro': 'Não autenticado'}), 401
     
-    # Conectar ao banco de dados
-    conn = sqlite3.connect('clientes.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
-    conn.commit()
-    conn.close()
+    cliente_id = session['cliente_id']
     
-    return jsonify({'sucesso': True})
+    try:
+        conn = sqlite3.connect('clientes.db')
+        c = conn.cursor()
+        # Garante que o usuário só pode remover seus próprios feeds
+        c.execute("DELETE FROM feeds WHERE id = ? AND cliente_id = ?", (feed_id, cliente_id))
+        conn.commit()
+        conn.close()
+        if c.rowcount > 0:
+            return jsonify({'sucesso': True})
+        else:
+            return jsonify({'sucesso': False, 'erro': 'Feed não encontrado ou não autorizado'}), 404
+    except sqlite3.Error as e:
+        return jsonify({'sucesso': False, 'erro': f'Erro no banco de dados: {e}'}), 500
+
+# --- Rotas de Geração de Imagem e Webhook ---
+
+@app.route('/visualizar-imagem')
+def visualizar_imagem():
+    """Gera e exibe uma imagem de exemplo com base na configuração."""
+    if 'cliente_id' not in session:
+        return "Não autorizado", 401
+    
+    cliente_id = session['cliente_id']
+    config = configuracoes.get(cliente_id)
+
+    if not config or not verificar_configuracao_completa(cliente_id):
+        return "Configuração do cliente incompleta ou não encontrada.", 404
+
+    titulo = "Este é um título de exemplo para a notícia"
+    texto = "Este é o texto da notícia de exemplo. Ele serve para demonstrar como o conteúdo será quebrado em várias linhas e exibido na imagem final gerada pelo sistema."
+
+    img = gerar_imagem_noticia(titulo, texto, config)
+    
+    img_io = BytesIO()
+    img.save(img_io, 'PNG')
+    img_io.seek(0)
+    
+    return send_from_directory('.', 'temp_image.png', as_attachment=False)
 
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
-    print("\n" + "="*50)
-    print("🔔 Webhook recebido!")
-    
+    """Recebe dados de notícias via webhook e gera a imagem."""
+    data = request.json
+    cliente_id = data.get('cliente_id')
+    titulo = data.get('titulo')
+    texto = data.get('texto')
+
+    if not all([cliente_id, titulo, texto]):
+        return jsonify({'erro': 'Dados incompletos'}), 400
+
+    config = configuracoes.get(cliente_id)
+    if not config:
+        return jsonify({'erro': 'Cliente não encontrado'}), 404
+
     try:
-        dados = request.json
-        cliente_id = dados.get('cliente_id')
-        
-        if not cliente_id or cliente_id not in configuracoes:
-            return jsonify({"status": "erro", "mensagem": "Cliente não configurado"}), 400
-        
-        config = configuracoes[cliente_id]
-        
-        # Extrair dados do post
-        post_id = dados.get('post_id')
-        titulo_noticia = dados.get('titulo', '')
-        resumo_noticia = dados.get('resumo', '')
-        url_imagem_destaque = dados.get('imagem_destaque', '')
-        categoria = dados.get('categoria', '')
-        hashtags = dados.get('hashtags', config.get('hashtags_padrao', ''))
-        
-        if not all([post_id, titulo_noticia, url_imagem_destaque]):
-            return jsonify({"status": "erro", "mensagem": "Dados incompletos"}), 400
-        
-        print(f"✅ Processando post ID: {post_id} para o cliente: {cliente_id}")
-        
-        # Criar imagem
-        imagem_bytes = criar_imagem_post(config, url_imagem_destaque, titulo_noticia, categoria, cliente_id)
-        if not imagem_bytes:
-            return jsonify({"status": "erro", "mensagem": "Falha ao criar imagem"}), 500
-        
-        # Fazer upload para o Cloudinary
-        nome_arquivo = f"{cliente_id}_{post_id}_{int(datetime.now().timestamp())}"
-        url_imagem_cloudinary = upload_para_cloudinary(imagem_bytes, nome_arquivo)
-        
-        if not url_imagem_cloudinary:
-            return jsonify({"status": "erro", "mensagem": "Falha ao fazer upload para o Cloudinary"}), 500
-        
-        # Publicar nas redes sociais
-        resultados = publicar_redes_sociais(config, url_imagem_cloudinary, titulo_noticia, resumo_noticia, hashtags)
-        
-        # Verificar resultados
-        sucessos = [r for r in resultados.values() if r.get('sucesso')]
-        if sucessos:
-            print("🎉 Publicação bem-sucedida em pelo menos uma rede social!")
-            return jsonify({"status": "sucesso", "resultados": resultados}), 200
-        else:
-            print("❌ Falha em todas as tentativas de publicação")
-            return jsonify({"status": "erro", "resultados": resultados}), 500
+        gerar_imagem_noticia(titulo, texto, config, f"noticia_{uuid.uuid4().hex[:8]}.png")
+        return jsonify({'sucesso': 'Imagem gerada com sucesso'}), 200
+    except Exception as e:
+        return jsonify({'erro': f'Falha ao gerar imagem: {str(e)}'}), 500
+
+def gerar_imagem_noticia(titulo, texto, config, nome_arquivo='temp_image.png'):
+    """Função principal para criar a imagem da notícia."""
+    largura, altura = 1080, 1080
+    cor_fundo = config.get('cor_fundo', '#FFFFFF')
+    
+    imagem = Image.new('RGB', (largura, altura), color=cor_fundo)
+    draw = ImageDraw.Draw(imagem)
+
+    # Adicionar Logo
+    try:
+        logo_path = config.get('logo_path')
+        if logo_path and os.path.exists(logo_path):
+            logo = Image.open(logo_path).convert("RGBA")
+            tamanho = config.get('tamanho_logo', 150)
+            logo.thumbnail((tamanho, tamanho))
             
+            # Máscara para transparência
+            if logo.mode == 'RGBA':
+                mask = logo.split()[3]
+                imagem.paste(logo, (config['posicao_logo_x'], config['posicao_logo_y']), mask)
+            else:
+                imagem.paste(logo, (config['posicao_logo_x'], config['posicao_logo_y']))
     except Exception as e:
-        print(f"❌ Erro crítico: {e}")
-        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+        print(f"Erro ao carregar ou colar o logo: {e}")
 
-@app.route('/testar-feed', methods=['POST'])
-def testar_feed():
-    if 'cliente_id' not in session:
-        return jsonify({'sucesso': False, 'erro': 'Não autorizado'}), 403
-    
-    url = request.form.get('url')
-    tipo = request.form.get('tipo')
-    
-    if not url or not tipo:
-        return jsonify({'sucesso': False, 'erro': 'URL e tipo são obrigatórios'}), 400
-    
+    # Adicionar Título
     try:
-        if tipo == 'rss':
-            noticias = processar_feed_rss(url, 3)
-        elif tipo == 'json':
-            noticias = processar_json_noticias(url, 3)
-        else:
-            return jsonify({'sucesso': False, 'erro': 'Tipo de feed não suportado'}), 400
-        
-        return jsonify({'sucesso': True, 'noticias': noticias})
+        fonte_titulo = ImageFont.truetype(config['font_path_titulo'], 60)
+        cor_titulo = config['cor_texto_titulo']
+        linhas_titulo = textwrap.wrap(titulo, width=35)
+        y_text = 200 # Posição inicial do título
+        for linha in linhas_titulo:
+            draw.text((50, y_text), linha, font=fonte_titulo, fill=cor_titulo)
+            y_text += 70
     except Exception as e:
-        return jsonify({'sucesso': False, 'erro': str(e)}), 500
+        print(f"Erro ao renderizar título: {e}")
 
-@app.route('/testar-webhook', methods=['POST'])
-def testar_webhook():
-    if 'cliente_id' not in session:
-        return jsonify({'sucesso': False, 'erro': 'Não autorizado'}), 403
-    
-    cliente_id = session['cliente_id']
-    config = configuracoes.get(cliente_id, {})
-    
-    # Dados de teste para o webhook
-    dados_teste = {
-        "cliente_id": cliente_id,
-        "post_id": "999",
-        "titulo": "Teste de Webhook - Notícia de Exemplo",
-        "resumo": "Esta é uma publicação de teste gerada pelo sistema de automação.",
-        "imagem_destaque": "https://via.placeholder.com/1080x551.png?text=Imagem+de+Teste",
-        "categoria": "urgente",
-        "hashtags": "#teste #automacao #webhook"
-    }
-    
-    # Chamar o webhook receiver internamente
-    with app.test_client() as client:
-        response = client.post('/webhook-receiver', 
-                             json=dados_teste,
-                             content_type='application/json')
-    
-    return jsonify({
-        'sucesso': response.status_code == 200,
-        'status_code': response.status_code,
-        'resposta': response.get_json()
-    })
+    # Adicionar Texto da Notícia
+    try:
+        y_text += 20 # Espaço entre título e texto
+        fonte_texto = ImageFont.truetype(config['font_path_texto'], 40)
+        cor_texto = config['cor_texto_noticia']
+        linhas_texto = textwrap.wrap(texto, width=50)
+        for linha in linhas_texto:
+            draw.text((50, y_text), linha, font=fonte_texto, fill=cor_texto)
+            y_text += 50
+    except Exception as e:
+        print(f"Erro ao renderizar texto da notícia: {e}")
 
-@app.route('/visualizar-imagem', methods=['POST'])
-def visualizar_imagem():
-    if 'cliente_id' not in session:
-        return jsonify({'sucesso': False, 'erro': 'Não autorizado'}), 403
-    
-    cliente_id = session['cliente_id']
-    config = configuracoes.get(cliente_id, {})
-    
-    # Dados de teste para visualização
-    url_imagem_teste = "https://via.placeholder.com/1080x551.png?text=Imagem+de+Exemplo"
-    titulo_teste = "Título de exemplo para teste de visualização"
-    categoria_teste = "urgente"
-    
-    # Criar imagem
-    imagem_bytes = criar_imagem_post(config, url_imagem_teste, titulo_teste, categoria_teste, cliente_id)
-    
-    if not imagem_bytes:
-        return jsonify({'sucesso': False, 'erro': 'Falha ao criar imagem'}), 500
-    
-    # Retornar a imagem em base64 para visualização
-    imagem_base64 = b64encode(imagem_bytes).decode('utf-8')
-    
-    return jsonify({
-        'sucesso': True,
-        'imagem': f"data:image/jpeg;base64,{imagem_base64}"
-    })
+    imagem.save(nome_arquivo)
+    return imagem
 
-# ==============================================================================
-# BLOCO 5: ROTAS DE STATUS E HEALTH CHECK
-# ==============================================================================
-@app.route('/health')
-def health_check():
-    """Endpoint simples para verificar se a aplicação está rodando"""
-    return jsonify({
-        "status": "healthy", 
-        "service": "social_automation",
-        "timestamp": datetime.now().isoformat()
-    }), 200
+# --- Rota para servir arquivos estáticos (logos, fontes) ---
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    """Serve os arquivos que foram carregados."""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-@app.route('/api/status')
-def api_status():
-    """Endpoint mais detalhado para verificar o status da API"""
-    client_count = len(configuracoes) if 'configuracoes' in globals() else 0
-    return jsonify({
-        "status": "online",
-        "service": "Sistema de Automação de Mídias Sociais",
-        "version": "2.3",
-        "timestamp": datetime.now().isoformat(),
-        "client_count": client_count,
-        "environment": "production"
-    }), 200
-
-# ==============================================================================
-# BLOCO 6: INICIALIZAÇÃO
-# ==============================================================================
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    inicializar_banco_de_dados()
+    # Garante que os diretórios de upload existam
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'logos'), exist_ok=True)
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'fonts'), exist_ok=True)
+    app.run(debug=True, port=5001)
