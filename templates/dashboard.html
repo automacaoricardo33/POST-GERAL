@@ -4,7 +4,7 @@
 {% block title %}Dashboard - {{ config.nome or 'Cliente' }}{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container mt-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
@@ -16,131 +16,124 @@
         {% endif %}
     {% endwith %}
 
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Configuração</h5>
-                    <p>Status: <span class="badge bg-{{ 'success' if config_completa else 'warning' }}">
-                        {{ 'Completa' if config_completa else 'Pendente' }}
-                    </span></p>
-                    <p class="card-text"><strong>Cliente ID:</strong> <code>{{ cliente_id }}</code></p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Próxima Execução</h5>
-                    <p class="card-text">O robô verifica os feeds a cada 15 minutos (configurado no Render).</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    
     <div class="row">
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h4>Feeds Configurados</h4>
-                </div>
-                <div class="card-body">
-                    {% if feeds %}
-                        {% for feed in feeds %}
-                            <div class="mb-3 p-2 border rounded">
-                                <h5>{{ feed.nome }}</h5>
-                                <p class="text-muted small" style="word-break: break-all;"><strong>URL:</strong> {{ feed.url }}</p>
-                                <p><strong>Tipo:</strong> {{ feed.tipo | upper }} | <strong>Categoria:</strong> {{ feed.categoria or 'Geral' }}</p>
-                                <button class="btn btn-sm btn-danger" onclick="removerFeed({{ feed.id }})">
+        <div class="col-md-7">
+            <h3>Feeds Configurados</h3>
+            <hr>
+            <div id="feed-list">
+                {% if feeds %}
+                    {% for feed in feeds %}
+                        <div class="card mb-3" id="feed-card-{{ feed.id }}">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ feed.nome }}</h5>
+                                <h6 class="card-subtitle mb-2 text-muted">{{ feed.tipo | upper }} | Categoria: {{ feed.categoria or 'N/A' }}</h6>
+                                <p class="card-text small" style="word-break: break-all;">{{ feed.url }}</p>
+                                <button class="btn btn-sm btn-outline-danger" onclick="removerFeed({{ feed.id }})">
                                     <i class="bi bi-trash"></i> Remover
                                 </button>
                             </div>
-                        {% endfor %}
-                    {% else %}
-                        <p>Nenhum feed configurado ainda.</p>
-                    {% endif %}
-                </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p id="no-feeds-message">Nenhum feed configurado ainda.</p>
+                {% endif %}
             </div>
         </div>
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h4>Adicionar Novo Feed</h4>
-                </div>
-                <div class="card-body">
-                    <form id="feedForm">
-                        <div class="mb-3">
-                            <label for="nome" class="form-label">Nome do Feed</label>
-                            <input type="text" class="form-control" id="nome" name="nome" required placeholder="Ex: Notícias Urgentes">
-                        </div>
-                        <div class="mb-3">
-                            <label for="url" class="form-label">URL do Feed</o-label>
-                            <input type="url" class="form-control" id="url" name="url" required placeholder="https://.../rss ou /feed.json">
-                        </div>
-                        <div class="mb-3">
-                            <label for="tipo" class="form-label">Tipo</label>
-                            <select class="form-select" id="tipo" name="tipo" required>
-                                <option value="rss">RSS</option>
-                                <option value="json">JSON</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="categoria" class="form-label">Categoria (Opcional)</label>
-                            <input type="text" class="form-control" id="categoria" name="categoria" placeholder="Ex: Urgente">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Adicionar</button>
-                    </form>
-                </div>
+
+        <div class="col-md-5">
+            <h3>Adicionar Novo Feed</h3>
+            <hr>
+            <div class="card p-4">
+                <form id="feedForm">
+                    <div class="mb-3">
+                        <label for="nome" class="form-label">Nome do Feed</label>
+                        <input type="text" class="form-control" id="nome" name="nome" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="url" class="form-label">URL do Feed</label>
+                        <input type="url" class="form-control" id="url" name="url" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tipo" class="form-label">Tipo</label>
+                        <select class="form-select" id="tipo" name="tipo" required>
+                            <option value="rss">RSS</option>
+                            <option value="json">JSON</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="categoria" class="form-label">Categoria (Opcional)</label>
+                        <input type="text" class="form-control" id="categoria" name="categoria">
+                    </div>
+                    <button type="submit" id="submitBtn" class="btn btn-primary">
+                        <span id="btnSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                        Adicionar Feed
+                    </button>
+                </form>
+                <div id="form-feedback" class="mt-3"></div>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    document.getElementById('feedForm').addEventListener('submit', async function(e) {
+    const feedForm = document.getElementById('feedForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const btnSpinner = document.getElementById('btnSpinner');
+    const formFeedback = document.getElementById('form-feedback');
+
+    feedForm.addEventListener('submit', async function(e) {
         e.preventDefault();
-        const formData = new FormData(this);
         
+        // Feedback visual
+        submitBtn.disabled = true;
+        btnSpinner.classList.remove('d-none');
+        formFeedback.innerHTML = '';
+
         try {
-            const response = await fetch('/adicionar-feed', {
+            const response = await fetch('/api/adicionar-feed', {
                 method: 'POST',
-                body: formData // Enviar como multipart/form-data é OK
+                body: new FormData(feedForm)
             });
             
             const result = await response.json();
             
-            if (result.sucesso) {
-                alert(result.mensagem);
-                location.reload(); // Recarrega a página para mostrar o novo feed
+            if (response.ok && result.sucesso) {
+                formFeedback.innerHTML = `<div class="alert alert-success">${result.mensagem}</div>`;
+                // Recarrega a página inteira para ver a lista atualizada
+                setTimeout(() => location.reload(), 1000);
             } else {
-                alert('Erro ao adicionar feed: ' + result.erro);
+                formFeedback.innerHTML = `<div class="alert alert-danger">${result.erro || 'Ocorreu um erro.'}</div>`;
             }
         } catch (error) {
-            console.error('Fetch error:', error);
-            alert('Erro de conexão. Verifique o console para mais detalhes.');
+            formFeedback.innerHTML = `<div class="alert alert-danger">Erro de conexão. Tente novamente.</div>`;
+        } finally {
+            // Reabilita o botão
+            submitBtn.disabled = false;
+            btnSpinner.classList.add('d-none');
         }
     });
     
     async function removerFeed(feedId) {
-        if (confirm('Tem certeza que deseja remover este feed?')) {
-            try {
-                // CORREÇÃO: Usando o método POST
-                const response = await fetch(`/remover-feed/${feedId}`, {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                
-                if (result.sucesso) {
-                    alert(result.mensagem);
-                    location.reload(); // Recarrega a página para atualizar a lista
-                } else {
-                    alert('Erro ao remover feed: ' + result.erro);
+        if (!confirm('Tem certeza que deseja remover este feed?')) return;
+
+        try {
+            const response = await fetch(`/api/remover-feed/${feedId}`, {
+                method: 'POST'
+            });
+            
+            const result = await response.json();
+
+            if (response.ok && result.sucesso) {
+                // Remove o card do feed da tela sem precisar recarregar a página
+                document.getElementById(`feed-card-${feedId}`).remove();
+                if (document.getElementById('feed-list').childElementCount === 0) {
+                     document.getElementById('feed-list').innerHTML = '<p id="no-feeds-message">Nenhum feed configurado ainda.</p>';
                 }
-            } catch (error) {
-                console.error('Fetch error:', error);
-                alert('Erro de conexão. Tente novamente.');
+            } else {
+                alert('Erro ao remover: ' + result.erro);
             }
+        } catch (error) {
+            alert('Erro de conexão ao tentar remover o feed.');
         }
     }
 </script>
