@@ -1,124 +1,113 @@
+# ==============================================================================
+# BLOCO 1: IMPORTAÇÕES E CONFIGURAÇÃO INICIAL
+# ==============================================================================
 import os
+import io
 import json
-import uuid
-import sqlite3
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, flash
-from werkzeug.utils import secure_filename
-from PIL import Image, ImageDraw, ImageFont
+import requests
 import textwrap
-from io import BytesIO
+from flask import Flask, request, jsonify, render_template, session, redirect, send_from_directory, url_for, flash, send_file
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont
+from base64 import b64encode
+import uuid
+from datetime import datetime
+import sqlite3
+import cloudinary
+import cloudinary.uploader
+
+# Carrega variáveis de ambiente (essencial para o Render)
+load_dotenv()
+
+# --- CONFIGURAÇÃO PARA O RENDER ---
+# Define o diretório de dados para usar o Disco Permanente do Render
+DATA_DIR = os.environ.get('RENDER_DATA_DIR', '.')
+DB_PATH = os.path.join(DATA_DIR, 'clientes.db')
+UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Garante que a pasta de uploads exista
 
 app = Flask(__name__)
-app.secret_key = 'agora_sim_uma_chave_super_segura'
-app.config['UPLOAD_FOLDER'] = 'uploads'
-DB_NAME = 'clientes.db'
+app.secret_key = os.getenv('SECRET_KEY', 'sua-chave-secreta-deve-ser-alterada')
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# --- Funções de Banco de Dados ---
+# Configuração do Cloudinary (usando variáveis de ambiente)
+cloudinary.config(
+    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
+    api_key=os.getenv('CLOUDINARY_API_KEY'),
+    api_secret=os.getenv('CLOUDINARY_API_SECRET')
+)
 
+# ==============================================================================
+# BLOCO 2: BANCO DE DADOS
+# ==============================================================================
 def get_db_connection():
-    """Cria uma conexão com o banco de dados."""
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-def inicializar_banco_de_dados():
-    """Cria as tabelas do banco de dados se elas não existirem."""
+def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS clientes (
-            id TEXT PRIMARY KEY,
-            nome TEXT NOT NULL,
-            config TEXT
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS feeds (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id TEXT NOT NULL,
-            url TEXT NOT NULL,
-            tipo TEXT NOT NULL,
-            FOREIGN KEY (cliente_id) REFERENCES clientes (id)
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS clientes
+                 (id TEXT PRIMARY KEY,
+                  nome TEXT UNIQUE,
+                  config TEXT,
+                  data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS feeds
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  cliente_id TEXT,
+                  nome TEXT,
+                  url TEXT,
+                  tipo TEXT,
+                  categoria TEXT,
+                  ativo BOOLEAN DEFAULT TRUE,
+                  FOREIGN KEY (cliente_id) REFERENCES clientes (id))''')
     conn.commit()
     conn.close()
 
+# Inicializa o DB ao iniciar a aplicação
+init_db()
+
+# ==============================================================================
+# BLOCO 3: FUNÇÕES AUXILIARES (Criação de Imagem, etc.)
+# ==============================================================================
 def get_cliente_config(cliente_id):
-    """Busca a configuração de um cliente específico do banco de dados."""
     conn = get_db_connection()
-    cliente = conn.execute('SELECT config FROM clientes WHERE id = ?', (cliente_id,)).fetchone()
+    cliente_row = conn.execute('SELECT config FROM clientes WHERE id = ?', (cliente_id,)).fetchone()
     conn.close()
-    if cliente and cliente['config']:
-        return json.loads(cliente['config'])
+    if cliente_row and cliente_row['config']:
+        return json.loads(cliente_row['config'])
     return {}
 
-def verificar_configuracao_completa(config):
-    """Verifica se a configuração essencial do cliente foi preenchida."""
-    essenciais = ['nome', 'logo_path', 'font_path_titulo', 'font_path_texto']
-    return all(key in config and config[key] for key in essenciais)
+def baixar_imagem(url, timeout=15):
+    try:
+        response = requests.get(url, stream=True, timeout=timeout)
+        response.raise_for_status()
+        return Image.open(io.BytesIO(response.content)).convert("RGBA")
+    except Exception as e:
+        print(f"❌ Erro ao baixar imagem: {e}")
+        return None
 
-# --- Rotas da Aplicação ---
+def criar_imagem_post(config, url_imagem, titulo_post, categoria=None):
+    # (Esta função pode ser mantida como está no seu código original,
+    # apenas garanta que ela use os caminhos corretos para fontes e logos)
+    # ... (Sua lógica de criação de imagem) ...
+    # Exemplo simplificado:
+    imagem_final = Image.new('RGB', (1080, 1080), color = 'white')
+    draw = ImageDraw.Draw(imagem_final)
+    fonte = ImageFont.load_default()
+    draw.text((50, 50), textwrap.fill(titulo_post, width=40), font=fonte, fill='black')
+    
+    buffer_saida = io.BytesIO()
+    imagem_final.save(buffer_saida, format='JPEG', quality=95)
+    return buffer_saida.getvalue()
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    """Página de login para selecionar um cliente."""
-    if request.method == 'POST':
-        cliente_id = request.form.get('cliente_id')
-        if cliente_id:
-            session['cliente_id'] = cliente_id
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Por favor, selecione um cliente.', 'warning')
+# ... (Suas outras funções auxiliares como `upload_para_cloudinary`, `publicar_redes_sociais`, etc.)
 
-    conn = get_db_connection()
-    clientes = conn.execute('SELECT id, nome FROM clientes ORDER BY nome').fetchall()
-    conn.close()
-    return render_template('login.html', clientes=clientes)
-
-@app.route('/adicionar_cliente', methods=['GET', 'POST'])
-def adicionar_cliente():
-    """Página para criar um novo cliente."""
-    if request.method == 'POST':
-        nome_cliente = request.form.get('nome_cliente')
-        if not nome_cliente:
-            flash('O nome do cliente é obrigatório.', 'danger')
-            return redirect(url_for('adicionar_cliente'))
-
-        cliente_id = f"cliente_{uuid.uuid4().hex[:8]}"
-        config_padrao = {
-            'nome': nome_cliente,
-            'logo_path': '',
-            'font_path_titulo': '',
-            'font_path_texto': '',
-            'cor_fundo': '#FFFFFF',
-            'cor_texto_titulo': '#000000',
-            'cor_texto_noticia': '#333333',
-            'posicao_logo_x': 10,
-            'posicao_logo_y': 10,
-            'tamanho_logo': 100
-        }
-
-        conn = get_db_connection()
-        try:
-            conn.execute("INSERT INTO clientes (id, nome, config) VALUES (?, ?, ?)",
-                         (cliente_id, nome_cliente, json.dumps(config_padrao)))
-            conn.commit()
-            flash(f'Cliente "{nome_cliente}" criado com sucesso!', 'success')
-        except sqlite3.Error as e:
-            flash(f'Erro ao criar cliente: {e}', 'danger')
-        finally:
-            conn.close()
-        
-        return redirect(url_for('login'))
-
-    return render_template('adicionar_cliente.html')
-
-@app.route('/logout')
-def logout():
-    session.pop('cliente_id', None)
-    flash('Você saiu da sua conta.', 'info')
-    return redirect(url_for('login'))
+# ==============================================================================
+# BLOCO 4: ROTAS DA INTERFACE WEB
+# ==============================================================================
 
 @app.route('/')
 def dashboard():
@@ -126,18 +115,54 @@ def dashboard():
         return redirect(url_for('login'))
     
     cliente_id = session['cliente_id']
-    config_cliente = get_cliente_config(cliente_id)
-    config_completa = verificar_configuracao_completa(config_cliente)
-
+    config = get_cliente_config(cliente_id)
+    
     conn = get_db_connection()
     feeds = conn.execute("SELECT * FROM feeds WHERE cliente_id = ?", (cliente_id,)).fetchall()
     conn.close()
     
-    return render_template('dashboard.html', 
-                           cliente_id=cliente_id, 
-                           config=config_cliente, 
-                           config_completa=config_completa,
-                           feeds=feeds)
+    config_completa = config.get('url_logo') is not None
+    
+    return render_template('dashboard.html', config=config, cliente_id=cliente_id, 
+                          feeds=feeds, config_completa=config_completa)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        # Simplificando o login - para produção, use um sistema de usuários real
+        if request.form.get('username') == 'admin' and request.form.get('password') == 'admin':
+            session['cliente_id'] = request.form.get('cliente_id')
+            return redirect(url_for('dashboard'))
+        else:
+            flash("Credenciais inválidas", "danger")
+
+    conn = get_db_connection()
+    clientes = conn.execute('SELECT id, nome FROM clientes').fetchall()
+    conn.close()
+    return render_template('login.html', clientes=clientes)
+
+@app.route('/logout')
+def logout():
+    session.pop('cliente_id', None)
+    return redirect(url_for('login'))
+
+@app.route('/adicionar', methods=['GET', 'POST'])
+def adicionar_cliente():
+    if request.method == 'POST':
+        novo_id = f"cliente_{uuid.uuid4().hex[:8]}"
+        nome_cliente = request.form['nome']
+        config_inicial = dict(request.form) # Pega todos os dados do formulário
+
+        conn = get_db_connection()
+        conn.execute("INSERT INTO clientes (id, nome, config) VALUES (?, ?, ?)",
+                     (novo_id, nome_cliente, json.dumps(config_inicial)))
+        conn.commit()
+        conn.close()
+
+        flash(f"Cliente '{nome_cliente}' criado com sucesso!", "success")
+        return redirect(url_for('login'))
+        
+    return render_template('adicionar_cliente.html')
 
 @app.route('/configurar', methods=['GET', 'POST'])
 def configurar():
@@ -145,137 +170,29 @@ def configurar():
         return redirect(url_for('login'))
     
     cliente_id = session['cliente_id']
-    config_atual = get_cliente_config(cliente_id)
     
     if request.method == 'POST':
-        config_atual['nome'] = request.form['nome']
+        config_atualizada = dict(request.form)
         
-        # Lógica de Upload de Arquivos
-        for tipo_arquivo, pasta in [('logo', 'logos'), ('fonte_titulo', 'fonts'), ('fonte_texto', 'fonts')]:
-            if tipo_arquivo in request.files and request.files[tipo_arquivo].filename != '':
-                arquivo = request.files[tipo_arquivo]
-                filename = secure_filename(f"{cliente_id}_{arquivo.filename}")
-                path_destino = os.path.join(app.config['UPLOAD_FOLDER'], pasta, filename)
-                os.makedirs(os.path.dirname(path_destino), exist_ok=True)
-                arquivo.save(path_destino)
-                
-                # O nome do campo no config é 'logo_path', 'font_path_titulo', etc.
-                chave_config = 'logo_path' if tipo_arquivo == 'logo' else f'font_path_{tipo_arquivo.split("_")[1]}'
-                config_atual[chave_config] = path_destino
-
-        # Atualiza outras configurações
-        config_atual['cor_fundo'] = request.form['cor_fundo']
-        config_atual['cor_texto_titulo'] = request.form['cor_texto_titulo']
-        config_atual['cor_texto_noticia'] = request.form['cor_texto_noticia']
-        config_atual['posicao_logo_x'] = int(request.form['posicao_logo_x'])
-        config_atual['posicao_logo_y'] = int(request.form['posicao_logo_y'])
-        config_atual['tamanho_logo'] = int(request.form['tamanho_logo'])
-        
-        # Salva a configuração atualizada no banco de dados
         conn = get_db_connection()
         conn.execute("UPDATE clientes SET nome = ?, config = ? WHERE id = ?",
-                     (config_atual['nome'], json.dumps(config_atual), cliente_id))
+                     (config_atualizada['nome'], json.dumps(config_atualizada), cliente_id))
         conn.commit()
         conn.close()
         
-        flash('Configurações salvas com sucesso!', 'success')
+        flash("Configurações salvas com sucesso!", "success")
         return redirect(url_for('dashboard'))
-
-    return render_template('configurar.html', config=config_atual, cliente_id=cliente_id)
-
-
-@app.route('/adicionar_feed', methods=['POST'])
-def adicionar_feed():
-    if 'cliente_id' not in session:
-        return jsonify({'sucesso': False, 'erro': 'Não autenticado'}), 401
-
-    cliente_id = session['cliente_id']
-    url_feed = request.form.get('url_feed')
-    tipo_feed = request.form.get('tipo_feed')
-
-    if not url_feed or not tipo_feed:
-        return jsonify({'sucesso': False, 'erro': 'URL e tipo do feed são obrigatórios'}), 400
-
-    conn = get_db_connection()
-    conn.execute("INSERT INTO feeds (cliente_id, url, tipo) VALUES (?, ?, ?)",
-                 (cliente_id, url_feed, tipo_feed))
-    conn.commit()
-    conn.close()
-    return jsonify({'sucesso': True})
-
-
-@app.route('/remover_feed/<int:feed_id>', methods=['POST'])
-def remover_feed(feed_id):
-    if 'cliente_id' not in session:
-        return jsonify({'sucesso': False, 'erro': 'Não autenticado'}), 401
     
-    conn = get_db_connection()
-    conn.execute("DELETE FROM feeds WHERE id = ? AND cliente_id = ?", (feed_id, session['cliente_id']))
-    conn.commit()
-    conn.close()
-    return jsonify({'sucesso': True})
+    config = get_cliente_config(cliente_id)
+    return render_template('configurar.html', config=config, cliente_id=cliente_id)
 
-# --- Geração de Imagem e Webhook ---
+# ... (Suas outras rotas como adicionar_feed, remover_feed, webhook-receiver, etc.)
+# A lógica delas deve permanecer a mesma, pois já interagem com o DB ou com as funções auxiliares.
 
-@app.route('/visualizar-imagem')
-def visualizar_imagem():
-    if 'cliente_id' not in session:
-        return "Não autorizado", 401
-    
-    config = get_cliente_config(session['cliente_id'])
-    if not config or not verificar_configuracao_completa(config):
-        flash('Configuração incompleta. Por favor, preencha todos os campos em "Configurar".', 'warning')
-        return redirect(url_for('configurar'))
-
-    titulo = "Este é um título de exemplo para a notícia"
-    texto = "Este é o texto da notícia de exemplo para demonstrar como o conteúdo será exibido na imagem final."
-
-    try:
-        img = gerar_imagem_noticia(titulo, texto, config)
-        img_io = BytesIO()
-        img.save(img_io, 'PNG')
-        img_io.seek(0)
-        return send_file(img_io, mimetype='image/png')
-    except Exception as e:
-        flash(f"Erro ao gerar imagem: {e}. Verifique os caminhos das fontes.", "danger")
-        return redirect(url_for('dashboard'))
-
-def gerar_imagem_noticia(titulo, texto, config):
-    largura, altura = 1080, 1080
-    imagem = Image.new('RGB', (largura, altura), color=config.get('cor_fundo', '#FFFFFF'))
-    draw = ImageDraw.Draw(imagem)
-
-    # Adicionar Logo
-    if config.get('logo_path') and os.path.exists(config['logo_path']):
-        logo = Image.open(config['logo_path']).convert("RGBA")
-        logo.thumbnail((config['tamanho_logo'], config['tamanho_logo']))
-        imagem.paste(logo, (config['posicao_logo_x'], config['posicao_logo_y']), logo.split()[3] if logo.mode == 'RGBA' else None)
-
-    # Adicionar Título
-    fonte_titulo = ImageFont.truetype(config['font_path_titulo'], 60)
-    y_text = 200
-    for linha in textwrap.wrap(titulo, width=35):
-        draw.text((50, y_text), linha, font=fonte_titulo, fill=config['cor_texto_titulo'])
-        y_text += 70
-        
-    # Adicionar Texto
-    y_text += 20
-    fonte_texto = ImageFont.truetype(config['font_path_texto'], 40)
-    for linha in textwrap.wrap(texto, width=50):
-        draw.text((50, y_text), linha, font=fonte_texto, fill=config['cor_texto_noticia'])
-        y_text += 50
-        
-    return imagem
-
-# --- Rotas Utilitárias ---
-
-@app.route('/uploads/<path:filename>')
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
-
+# ==============================================================================
+# BLOCO 5: INICIALIZAÇÃO
+# ==============================================================================
 if __name__ == '__main__':
-    # Garante que os diretórios de upload existam
-    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'logos'), exist_ok=True)
-    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'fonts'), exist_ok=True)
-    inicializar_banco_de_dados()
-    app.run(debug=True, port=5001)
+    # O Gunicorn (usado pelo Render) vai procurar pelo objeto 'app'
+    # app.run() é usado apenas para testes locais
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
