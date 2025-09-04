@@ -1,7 +1,5 @@
 {% extends 'layout.html' %}
-
 {% block title %}Login - RS Sistema de Automação{% endblock %}
-
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-6">
@@ -37,8 +35,7 @@
                 {% else %}
                     <div class="text-center">
                         <h4>Bem-vindo!</h4>
-                        <p>Nenhum cliente foi encontrado no sistema.</p>
-                        <p>Para começar, crie seu primeiro cliente.</p>
+                        <p>Nenhum cliente foi encontrado. Para começar, crie seu primeiro cliente.</p>
                         <a href="{{ url_for('adicionar_cliente') }}" class="btn btn-success btn-lg mt-2">
                             <i class="bi bi-plus-circle"></i> Criar Primeiro Cliente
                         </a>
