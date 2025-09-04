@@ -1,3 +1,4 @@
+{% raw %}
 {% extends 'layout.html' %}
 
 {% block title %}Dashboard - {{ config.nome or 'Cliente' }}{% endblock %}
@@ -14,28 +15,6 @@
             {% endfor %}
         {% endif %}
     {% endwith %}
-
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Configuração</h5>
-                    <p>Status: <span class="badge bg-{{ 'success' if config_completa else 'warning' }}">
-                        {{ 'Completa' if config_completa else 'Pendente' }}
-                    </span></p>
-                    <p class="card-text"><a href="{{ url_for('configurar') }}" class="btn btn-sm btn-outline-primary">Editar Configurações</a></p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Próxima Execução</h5>
-                    <p class="card-text">O robô verifica os feeds periodicamente (conforme configurado no Render).</p>
-                </div>
-            </div>
-        </div>
-    </div>
     
     <div class="row">
         <div class="col-md-7">
@@ -85,10 +64,7 @@
                         <label for="categoria" class="form-label">Categoria (Opcional)</label>
                         <input type="text" class="form-control" id="categoria" name="categoria">
                     </div>
-                    <button type="submit" id="submitBtn" class="btn btn-primary">
-                        <span id="btnSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
-                        Adicionar Feed
-                    </button>
+                    <button type="submit" id="submitBtn" class="btn btn-primary">Adicionar Feed</button>
                 </form>
                 <div id="form-feedback" class="mt-3"></div>
             </div>
@@ -97,61 +73,68 @@
 </div>
 
 <script>
+    // ALERTA 1: Se você vir este, o JavaScript está rodando.
+    alert('DEBUG: Página carregada.');
+
     const feedForm = document.getElementById('feedForm');
     const submitBtn = document.getElementById('submitBtn');
-    const btnSpinner = document.getElementById('btnSpinner');
     const formFeedback = document.getElementById('form-feedback');
 
     feedForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         
-        submitBtn.disabled = true;
-        btnSpinner.classList.remove('d-none');
+        // ALERTA 2: Se você vir este, o clique no botão funcionou.
+        alert('DEBUG: Botão "Adicionar" clicado.');
+
+        const formData = new FormData(feedForm);
+        
         formFeedback.innerHTML = '';
+        submitBtn.disabled = true;
 
         try {
+            // ALERTA 3: Se você vir este, estamos prestes a contatar o servidor.
+            alert('DEBUG: Enviando dados para o servidor...');
+
             const response = await fetch('/api/adicionar-feed', {
                 method: 'POST',
-                body: new FormData(feedForm)
+                body: formData
             });
             
+            // ALERTA 4: Se você vir este, o servidor respondeu algo.
+            alert('DEBUG: Servidor respondeu com status: ' + response.status);
+
             const result = await response.json();
             
             if (response.ok && result.sucesso) {
-                alert(result.mensagem || 'Feed adicionado com sucesso!');
+                alert('SUCESSO: ' + result.mensagem);
                 location.reload();
             } else {
+                alert('ERRO (do servidor): ' + result.erro);
                 formFeedback.innerHTML = `<div class="alert alert-danger">${result.erro || 'Ocorreu um erro.'}</div>`;
             }
         } catch (error) {
-            formFeedback.innerHTML = `<div class="alert alert-danger">Erro de conexão. Tente novamente.</div>`;
+            alert('ERRO CRÍTICO (de conexão): ' + error.message);
+            formFeedback.innerHTML = `<div class="alert alert-danger">Erro de conexão ou resposta inválida. Verifique o console (F12).</div>`;
         } finally {
             submitBtn.disabled = false;
-            btnSpinner.classList.add('d-none');
         }
     });
     
     async function removerFeed(feedId) {
-        if (!confirm('Tem certeza que deseja remover este feed?')) return;
-
+        if (!confirm('Tem certeza?')) return;
         try {
-            const response = await fetch(`/api/remover-feed/${feedId}`, {
-                method: 'POST'
-            });
-            
+            const response = await fetch(`/api/remover-feed/${feedId}`, { method: 'POST' });
             const result = await response.json();
-
             if (response.ok && result.sucesso) {
-                document.getElementById(`feed-card-${feedId}`).remove();
-                if (document.getElementById('feed-list').childElementCount === 0) {
-                     document.getElementById('feed-list').innerHTML = '<p id="no-feeds-message">Nenhum feed configurado ainda.</p>';
-                }
+                alert(result.mensagem);
+                location.reload();
             } else {
-                alert('Erro ao remover: ' + (result.erro || 'Erro desconhecido.'));
+                alert('Erro ao remover: ' + result.erro);
             }
         } catch (error) {
-            alert('Erro de conexão ao tentar remover o feed.');
+            alert('Erro de conexão ao remover.');
         }
     }
 </script>
 {% endblock %}
+{% endraw %}
