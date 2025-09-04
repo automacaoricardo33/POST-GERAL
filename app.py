@@ -145,42 +145,47 @@ def configurar():
     
     if request.method == 'POST':
         conn = get_db_connection()
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
-            config_atual = cur.fetchone()['config']
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
+                config_atual = cur.fetchone()['config']
 
-        config_atual['nome'] = request.form.get('nome')
-        
-        for tipo in ['logo', 'fonte_titulo', 'fonte_texto']:
-            if tipo in request.files and request.files[tipo].filename != '':
-                arquivo = request.files[tipo]
-                try:
-                    upload_result = cloudinary.uploader.upload(
-                        arquivo,
-                        folder=f"automacao/{cliente_id}",
-                        resource_type="raw" if 'fonte' in tipo else 'image'
-                    )
-                    config_atual[f'{tipo}_url'] = upload_result.get('secure_url')
-                    flash(f"{tipo.replace('_', ' ').capitalize()} enviado com sucesso!", "info")
-                except Exception as e:
-                    flash(f"Erro ao enviar {tipo}: {str(e)}", "danger")
+            config_atual['nome'] = request.form.get('nome')
+            
+            for tipo in ['logo', 'fonte_titulo', 'fonte_texto']:
+                if tipo in request.files and request.files[tipo].filename != '':
+                    arquivo = request.files[tipo]
+                    try:
+                        upload_result = cloudinary.uploader.upload(
+                            arquivo,
+                            folder=f"automacao/{cliente_id}",
+                            resource_type="raw" if 'fonte' in tipo else 'image'
+                        )
+                        config_atual[f'{tipo}_url'] = upload_result.get('secure_url')
+                        flash(f"{tipo.replace('_', ' ').capitalize()} enviado com sucesso!", "info")
+                    except Exception as e:
+                        flash(f"Erro ao enviar {tipo}: {str(e)}", "danger")
 
-        campos_form = ['cor_fundo', 'cor_texto_titulo', 'cor_texto_noticia', 
-                       'posicao_logo_x', 'posicao_logo_y', 'tamanho_logo']
-        for campo in campos_form:
-            if request.form.get(campo):
-                config_atual[campo] = request.form.get(campo)
+            campos_form = ['cor_fundo', 'cor_texto_titulo', 'cor_texto_noticia', 
+                           'posicao_logo_x', 'posicao_logo_y', 'tamanho_logo']
+            for campo in campos_form:
+                if request.form.get(campo):
+                    config_atual[campo] = request.form.get(campo)
+            
+            with conn.cursor() as cur:
+                cur.execute("UPDATE clientes SET nome = %s, config = %s WHERE id = %s",
+                            (config_atual['nome'], json.dumps(config_atual), cliente_id))
+            conn.commit()
+            flash("Configurações salvas com sucesso!", "success")
+
+        except Exception as e:
+            flash(f"Ocorreu um erro ao salvar: {str(e)}", "danger")
+        finally:
+            conn.close()
         
-        with conn.cursor() as cur:
-            cur.execute("UPDATE clientes SET nome = %s, config = %s WHERE id = %s",
-                        (config_atual['nome'], json.dumps(config_atual), cliente_id))
-        conn.commit()
-        conn.close()
-        
-        flash("Configurações salvas com sucesso!", "success")
         return redirect(url_for('dashboard'))
 
-    else: # request.method == 'GET'
+    else: # GET
         conn = get_db_connection()
         with conn.cursor(cursor_factory=DictCursor) as cur:
             cur.execute("SELECT config FROM clientes WHERE id = %s", (cliente_id,))
@@ -188,42 +193,8 @@ def configurar():
         conn.close()
         return render_template('configurar.html', config=config, cliente_id=cliente_id)
 
-@app.route('/adicionar_feed', methods=['POST'])
-def adicionar_feed():
-    if 'cliente_id' not in session:
-        return jsonify(sucesso=False, erro='Não autenticado'), 401
-    
-    cliente_id = session['cliente_id']
-    url_feed = request.form.get('url_feed')
-    tipo_feed = request.form.get('tipo_feed')
-
-    if not all([url_feed, tipo_feed]):
-        return jsonify(sucesso=False, erro='URL e tipo são obrigatórios'), 400
-
-    conn = get_db_connection()
-    with conn.cursor() as cur:
-        cur.execute("INSERT INTO feeds (cliente_id, url, tipo) VALUES (%s, %s, %s)",
-                    (cliente_id, url_feed, tipo_feed))
-    conn.commit()
-    conn.close()
-    flash("Feed adicionado com sucesso!", "success")
-    return jsonify(sucesso=True)
-
-@app.route('/remover_feed/<int:feed_id>', methods=['POST'])
-def remover_feed(feed_id):
-    if 'cliente_id' not in session:
-        return jsonify(sucesso=False, erro='Não autenticado'), 401
-
-    conn = get_db_connection()
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM feeds WHERE id = %s AND cliente_id = %s", (feed_id, session['cliente_id']))
-    conn.commit()
-    conn.close()
-    flash("Feed removido.", "info")
-    return jsonify(sucesso=True)
-
+# --- Função de Inicialização ---
 def initialize_app():
-    """Função para ser chamada ANTES de iniciar o servidor Gunicorn no Render."""
     print("🚀 Executando inicialização da aplicação...")
     init_db()
 
